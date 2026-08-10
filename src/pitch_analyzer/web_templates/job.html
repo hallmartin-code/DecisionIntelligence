@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block title %}Analyzing {{ job.filename }} — TEN Capital Network{% endblock %}
+
+{% block card %}
+<div class="card">
+  <div class="eyebrow is-working" id="eyebrow">Analyzing</div>
+  <h1 id="headline">{{ job.company_name or job.filename }}</h1>
+  <p class="lede" id="lede">
+    Claude is reading the deck and building the one-pager. This usually takes
+    two to four minutes — you can leave this page open, or come back to this URL
+    later.
+  </p>
+
+  <div class="alert error" id="error-box" role="alert" hidden></div>
+
+  <div id="progress-block">
+    <div class="status-row">
+      <span class="status-label" id="status-label">{{ job.label }}</span>
+      <span class="status-pct" id="status-pct">{{ job.progress }}%</span>
+    </div>
+    <div class="track" role="progressbar" aria-labelledby="status-label"
+         aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ job.progress }}"
+         id="track">
+      <div class="fill" id="fill" style="width: {{ job.progress }}%"></div>
+    </div>
+    <p class="meta" id="meta" aria-live="polite"></p>
+  </div>
+
+  <div id="result" hidden>
+    <span class="verdict" id="verdict"></span>
+    <div class="scores">
+      <div>
+        <div class="score-value" id="score-weighted">—</div>
+        <div class="score-key">Weighted / 10</div>
+      </div>
+      <div>
+        <div class="score-value" id="score-confidence">—</div>
+        <div class="score-key">Confidence</div>
+      </div>
+      <div>
+        <div class="score-value" id="score-slides">—</div>
+        <div class="score-key">Slides read</div>
+      </div>
+    </div>
+    <a id="download" href="/jobs/{{ job.id }}/report.pdf" download>
+      <button class="cta" type="button">Download the one-pager</button>
+    </a>
+  </div>
+
+  <div class="log" id="log" aria-live="polite"></div>
+
+  <a class="backlink" href="/">&larr; Analyze another deck</a>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const jobId = {{ job.id | tojson }};
+  const filename = {{ job.filename | tojson }};
+  const POLL_MS = 2500;
+  const RETRY_MS = 5000;
+
+  const verdictClass = {
+    "Invest": "invest",
+    "Investigate Further": "investigate",
+    "Pass": "pass",
+  };
+
+  const el = (id) => document.getElementById(id);
+
+  function renderProgress(data) {
+    el("status-label").textContent = data.label;
+    el("status-pct").textContent = data.progress + "%";
+    el("fill").style.width = data.progress + "%";
+    el("track").setAttribute("aria-valuenow", data.progress);
+
+    const parts = [];
+    if (data.company_name) parts.push(data.company_name);
+    if (data.slide_count) parts.push(data.slide_count + " slides");
+    el("meta").textContent = parts.join("  ·  ");
+
+    if (data.company_name) el("headline").textContent = data.company_name;
+    if (data.log && data.log.length) el("log").textContent = data.log.join("\n");
+  }
+
+  function renderFailure(message) {
+    el("eyebrow").textContent = "Failed";
+    el("eyebrow").classList.remove("is-working");
+    el("fill").classList.add("is-failed");
+    el("lede").textContent =
+      "The analysis did not complete. Nothing was charged for a run that failed before the model replied.";
+    const box = el("error-box");
+    box.textContent = message;
+    box.hidden = false;
+  }
+
+  function renderSuccess(data) {
+    el("eyebrow").textContent = "Complete";
+    el("eyebrow").classList.remove("is-working");
+    el("fill").classList.add("is-done");
+    el("progress-block").hidden = true;
+    el("lede").textContent =
+      "The one-pager is ready. It is removed automatically along with the uploaded deck, so download it now.";
+
+    const verdict = el("verdict");
+    verdict.textContent = (data.recommendation || "").toUpperCase();
+    verdict.classList.add(verdictClass[data.recommendation] || "investigate");
+
+    el("score-weighted").textContent =
+      data.weighted_overall === null ? "—" : data.weighted_overall.toFixed(1);
+    el("score-confidence").textContent =
+      data.confidence_pct === null ? "—" : data.confidence_pct + "%";
+    el("score-slides").textContent = data.slide_count || "—";
+
+    el("headline").textContent = data.company_name || filename;
+    el("result").hidden = false;
+    document.title = `${data.recommendation} — ${data.company_name || filename}`;
+  }
+
+  async function poll() {
+    let data;
+    try {
+      const response = await fetch(`/jobs/${jobId}/status`, {
+        headers: { "Accept": "application/json" },
+      });
+      if (response.status === 404) {
+        renderFailure("This job has expired and its files have been deleted. Upload the deck again.");
+        return;
+      }
+      if (!response.ok) throw new Error("status " + response.status);
+      data = await response.json();
+    } catch (error) {
+      el("meta").textContent = "Lost contact with the server — retrying…";
+      setTimeout(poll, RETRY_MS);
+      return;
+    }
+
+    renderProgress(data);
+
+    if (!data.done) {
+      setTimeout(poll, POLL_MS);
+    } else if (data.error) {
+      renderFailure(data.error);
+    } else {
+      renderSuccess(data);
+    }
+  }
+
+  poll();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+
+{% block card %}
+<form class="card" id="upload-form" method="post" action="/analyze"
+      enctype="multipart/form-data" novalidate>
+  <div class="eyebrow">Deck Analyzer</div>
+  <h1>Pitch Deck<span class="arrow">&rarr;</span><span class="to">Investor One&#8209;Pager</span></h1>
+  <p class="lede">
+    Upload a pitch deck and get a polished single-page investor PDF, analyzed
+    and structured by Claude.
+  </p>
+
+  {% if not api_key_configured %}
+  <div class="alert warn">
+    <strong>No API key configured.</strong> Set <code>ANTHROPIC_API_KEY</code>
+    in the service environment before running an analysis.
+  </div>
+  {% endif %}
+
+  <div class="alert error" id="client-error" role="alert" hidden></div>
+
+  <label class="dropzone" id="dropzone" for="deck-upload">
+    <input class="file-input" type="file" id="deck-upload" name="deck"
+           accept=".pdf,.pptx" required>
+    <div class="dropzone-body">
+      <div class="dropzone-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="var(--ink-100)" stroke-width="1.6"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M14 3v4a1 1 0 0 0 1 1h4"/>
+          <path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2Z"/>
+        </svg>
+      </div>
+      <div class="dropzone-title" id="dropzone-title">Click or drop a deck here</div>
+      <div class="dropzone-sub" id="dropzone-sub">
+        <b>.pdf</b> &middot; <b>.pptx</b> &nbsp;·&nbsp; up to {{ max_upload_mb }}&nbsp;MB
+      </div>
+    </div>
+  </label>
+
+  <details class="options">
+    <summary>Analysis options</summary>
+    <div class="options-grid">
+      <div class="field">
+        <label for="orientation">Page orientation</label>
+        <select id="orientation" name="orientation">
+          <option value="landscape" selected>Landscape</option>
+          <option value="portrait">Portrait</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="model">Model</label>
+        <input id="model" type="text" name="model" value="{{ default_model }}"
+               spellcheck="false" autocomplete="off">
+      </div>
+      <div class="switch">
+        <input id="include_images" type="checkbox" name="include_images" value="on" checked>
+        <label for="include_images">
+          Send slide images to the model
+          <p class="note">
+            A better read of charts and layout, at higher cost and a longer run.
+            Uncheck for a faster text-only analysis.
+          </p>
+        </label>
+      </div>
+    </div>
+  </details>
+
+  <button class="cta" type="submit" id="submit-button">Generate one-pager PDF</button>
+
+  <div class="disclosure">
+    The deck is processed on the server, held only for as long as the analysis
+    needs, and deleted automatically within {{ job_ttl_minutes }} minutes. It is
+    not emailed or shared with anyone.
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const form = document.getElementById("upload-form");
+  const input = document.getElementById("deck-upload");
+  const dropzone = document.getElementById("dropzone");
+  const title = document.getElementById("dropzone-title");
+  const sub = document.getElementById("dropzone-sub");
+  const button = document.getElementById("submit-button");
+  const errorBox = document.getElementById("client-error");
+
+  const ALLOWED = [".pdf", ".pptx"];
+  const MAX_BYTES = {{ max_upload_mb }} * 1024 * 1024;
+  const DEFAULT_TITLE = title.textContent;
+  const DEFAULT_SUB = sub.innerHTML;
+
+  function showError(message) {
+    errorBox.textContent = message;
+    errorBox.hidden = false;
+  }
+
+  function clearError() {
+    errorBox.hidden = true;
+  }
+
+  function formatSize(bytes) {
+    return bytes < 1024 * 1024
+      ? (bytes / 1024).toFixed(0) + " KB"
+      : (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
+  function reset() {
+    input.value = "";
+    dropzone.classList.remove("has-file");
+    title.textContent = DEFAULT_TITLE;
+    sub.innerHTML = DEFAULT_SUB;
+  }
+
+  function accept(file) {
+    const name = (file.name || "").toLowerCase();
+    if (!ALLOWED.some((extension) => name.endsWith(extension))) {
+      showError(`“${file.name}” is not a supported deck. Upload a .pdf or .pptx file.`);
+      reset();
+      return false;
+    }
+    if (file.size > MAX_BYTES) {
+      showError(`“${file.name}” is ${formatSize(file.size)} — the limit is {{ max_upload_mb }} MB.`);
+      reset();
+      return false;
+    }
+    clearError();
+    dropzone.classList.add("has-file");
+    title.textContent = file.name;
+    sub.textContent = formatSize(file.size) + " · ready to analyze";
+    return true;
+  }
+
+  input.addEventListener("change", function () {
+    if (input.files.length) accept(input.files[0]);
+  });
+
+  ["dragenter", "dragover"].forEach(function (name) {
+    dropzone.addEventListener(name, function (event) {
+      event.preventDefault();
+      dropzone.classList.add("is-dragging");
+    });
+  });
+
+  ["dragleave", "drop"].forEach(function (name) {
+    dropzone.addEventListener(name, function (event) {
+      event.preventDefault();
+      dropzone.classList.remove("is-dragging");
+    });
+  });
+
+  dropzone.addEventListener("drop", function (event) {
+    const files = event.dataTransfer && event.dataTransfer.files;
+    if (!files || !files.length) return;
+    // DataTransfer assignment is how a dropped file reaches the form field.
+    input.files = files;
+    accept(files[0]);
+  });
+
+  form.addEventListener("submit", function (event) {
+    if (!input.files.length) {
+      event.preventDefault();
+      showError("Choose a deck to analyze first.");
+      return;
+    }
+    if (!accept(input.files[0])) {
+      event.preventDefault();
+      return;
+    }
+    button.disabled = true;
+    button.textContent = "Uploading…";
+  });
+})();
+</script>
+{% endblock %}

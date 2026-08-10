@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pitch-analyzer"
+version = "0.1.0"
+description = "Decision Intelligence one-pager reports from investor pitch decks (PDF/PPTX)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [{ name = "TEN Capital Network" }]
+dependencies = [
+    "typer>=0.12.0",
+    "pdfplumber>=0.11.0",
+    "python-pptx>=1.0.0",
+    "Pillow>=10.0.0",
+    "anthropic>=0.40.0",
+    "reportlab>=4.1.0",
+    "rich>=13.7.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.6.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "jinja2>=3.1.0",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "httpx>=0.27.0"]
+
+[project.scripts]
+pitch-analyzer = "pitch_analyzer.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pitch_analyzer = ["web_templates/*.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore:builtin type SwigPyPacked has no __module__ attribute:DeprecationWarning",
+    "ignore:builtin type SwigPyObject has no __module__ attribute:DeprecationWarning",
+    "ignore:builtin type swigvarlink has no __module__ attribute:DeprecationWarning",
+    # Starlette's own TestClient import; nothing we control.
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]
