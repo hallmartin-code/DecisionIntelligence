@@ -28,6 +28,7 @@ from .analyze import (
     analyze_deck,
 )
 from .ingest import UnsupportedDeckError, guess_company_name, ingest
+from .notify import notify_report_ready
 from .render import LayoutOverflowError, render_one_pager
 
 
@@ -87,6 +88,7 @@ class Job:
     recommendation: Optional[str] = None
     confidence_pct: Optional[int] = None
     weighted_overall: Optional[float] = None
+    email_status: Optional[str] = None
     log: list[str] = field(default_factory=list)
 
     @property
@@ -116,6 +118,7 @@ class Job:
             "recommendation": self.recommendation,
             "confidence_pct": self.confidence_pct,
             "weighted_overall": self.weighted_overall,
+            "email_status": self.email_status,
             "created_at": self.created_at.isoformat(),
             "log": list(self.log),
         }
@@ -248,6 +251,20 @@ class JobStore:
             )
             job.report_path = report_path
             job.log.append("Report rendered.")
+
+            # Best-effort: a mail problem must not fail a finished analysis.
+            status = notify_report_ready(
+                analysis,
+                report_path,
+                company_name=job.company_name or Path(job.filename).stem,
+                deck_filename=job.filename,
+                model=job.model,
+                slide_count=job.slide_count,
+            )
+            if status:
+                job.log.append(status)
+                job.email_status = status
+
             job.state = JobState.DONE
 
         except Exception as error:  # noqa: BLE001 - surfaced to the user verbatim

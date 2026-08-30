@@ -46,6 +46,7 @@
     <a id="download" href="/jobs/{{ job.id }}/report.pdf" download>
       <button class="cta" type="button">Download the one-pager</button>
     </a>
+    <p class="meta" id="email-status"></p>
   </div>
 
   <div class="log" id="log" aria-live="polite"></div>
@@ -115,6 +116,7 @@
     el("score-slides").textContent = data.slide_count || "—";
 
     el("headline").textContent = data.company_name || filename;
+    el("email-status").textContent = data.email_status || "";
     el("result").hidden = false;
     document.title = `${data.recommendation} — ${data.company_name || filename}`;
   }

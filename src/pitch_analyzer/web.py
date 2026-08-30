@@ -22,6 +22,7 @@ from fastapi.templating import Jinja2Templates
 from . import __version__
 from .analyze import DEFAULT_MODEL
 from .jobs import JobStore
+from .notify import load_email_config
 
 load_dotenv()
 
@@ -155,6 +156,7 @@ def index(request: Request, _: None = Depends(require_auth)) -> HTMLResponse:
             "max_upload_mb": MAX_UPLOAD_MB,
             "job_ttl_minutes": JOB_TTL_MINUTES,
             "api_key_configured": bool(os.environ.get("ANTHROPIC_API_KEY")),
+            "email_recipients": _email_recipients(),
         },
     )
 
@@ -237,6 +239,12 @@ def job_report(job_id: str, _: None = Depends(require_auth)) -> FileResponse:
         media_type="application/pdf",
         filename=job.report_filename,
     )
+
+
+def _email_recipients() -> list[str]:
+    """Who each finished report is emailed to, for the upload-page disclosure."""
+    config = load_email_config()
+    return list(config.recipients) if config else []
 
 
 def _wants_json(request: Request) -> bool:

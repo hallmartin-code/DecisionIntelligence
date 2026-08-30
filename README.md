@@ -68,6 +68,7 @@ pitch-analyzer analyze <DECK_PATH> [OPTIONS]
 | `--verbose` / `-v` | Stream analysis progress to stdout. |
 | `--no-images` | Skip image extraction — faster and cheaper, less context. |
 | `--logo PATH` | Optional logo image for the report header. |
+| `--no-email` | Skip the email notification for this run. |
 
 `DECK_PATH` must be `.pdf` or `.pptx`; anything else is rejected before any API
 call is made.
@@ -130,6 +131,36 @@ unprotected.
 
 ---
 
+## Email notifications
+
+Every finished analysis is emailed to the team through [Resend](https://resend.com),
+with the one-pager attached as a PDF and the verdict, thesis, strengths,
+concerns, top risks, and diligence questions in the body (HTML and plain text).
+
+Set `RESEND_API_KEY` to switch it on; leave it unset and nothing is sent.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `RESEND_API_KEY` | — | Enables email. From <https://resend.com/api-keys> |
+| `REPORT_EMAIL_TO` | `Info@tencapital.group` | Recipients, comma-separated |
+| `REPORT_EMAIL_FROM` | `TEN Capital Deck Analyzer <deck-analyzer@tencapital.group>` | Must use a domain verified at <https://resend.com/domains> |
+| `EMAIL_NOTIFICATIONS` | `1` | Set to `0` to pause sending without removing the key |
+
+**Sending is best-effort and never fails an analysis.** If Resend is down, rate
+limits, or rejects the sender, the report is still rendered and downloadable —
+the delivery problem is reported on the job page and in the CLI output. The CLI
+also takes `--no-email` to skip a single run.
+
+**The sending domain must be verified in Resend.** `tencapital.group` is
+verified, which is why `deck-analyzer@tencapital.group` works; any other domain
+returns a 403 until it is verified.
+
+**Uploaders are told before they upload.** When email is configured, the upload
+page names the recipients in its disclosure; with email off it says nothing is
+sent. A test enforces that the page and the behaviour agree.
+
+---
+
 ## Deploying to Railway
 
 The repo carries `Procfile`, `railway.json`, and `.python-version`, so a
@@ -149,6 +180,9 @@ deployment is configuration only — no build script to write.
    | `MAX_UPLOAD_MB` | no | Defaults to `25` |
    | `JOB_TTL_MINUTES` | no | Defaults to `60` |
    | `MAX_CONCURRENT_ANALYSES` | no | Defaults to `2` |
+   | `RESEND_API_KEY` | no | Enables emailing each report (see above) |
+   | `REPORT_EMAIL_TO` | no | Defaults to `Info@tencapital.group` |
+   | `REPORT_EMAIL_FROM` | no | Must use a Resend-verified domain |
    | `DATA_DIR` | no | Defaults to the system temp directory |
 
    Do **not** set `PORT` — Railway injects it.
@@ -304,6 +338,7 @@ src/pitch_analyzer/
 ├── render.py        ReportLab one-pager and fit guard
 ├── cli.py           Typer entry point
 ├── jobs.py          Background job queue for the web app
+├── notify.py        Resend email delivery (best-effort)
 ├── web.py           FastAPI routes, auth, error pages
 └── web_templates/   base · index · job · error (TEN Capital design system)
 

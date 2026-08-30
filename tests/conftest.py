@@ -28,6 +28,26 @@ def block_real_api_clients(monkeypatch):
     monkeypatch.setattr(anthropic, "Anthropic", _forbidden)
 
 
+@pytest.fixture(autouse=True)
+def block_real_email(monkeypatch):
+    """No test may send a real email.
+
+    `.env` is loaded when the web app is imported, so a live RESEND_API_KEY can
+    leak into the test process. Email is switched off by default and the
+    transport is stubbed, so a stray job cannot deliver anything.
+    """
+    from pitch_analyzer import notify
+
+    monkeypatch.delenv("RESEND_API_KEY", raising=False)
+
+    def _forbidden(config, message):
+        raise AssertionError(
+            "A test tried to POST to Resend. Pass sender_fn= or keep email off."
+        )
+
+    monkeypatch.setattr(notify, "post_to_resend", _forbidden)
+
+
 def _section(score: int, name: str) -> dict:
     return {
         "score": score,

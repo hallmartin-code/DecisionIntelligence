@@ -69,8 +69,13 @@
 
   <div class="disclosure">
     The deck is processed on the server, held only for as long as the analysis
-    needs, and deleted automatically within {{ job_ttl_minutes }} minutes. It is
-    not emailed or shared with anyone.
+    needs, and deleted automatically within {{ job_ttl_minutes }} minutes.
+    {% if email_recipients %}
+    A copy of every finished one-pager is emailed to
+    {% for address in email_recipients %}<code>{{ address }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.
+    {% else %}
+    It is not emailed or shared with anyone.
+    {% endif %}
   </div>
 </form>
 {% endblock %}

@@ -18,6 +18,7 @@ from .analyze import (
 )
 from .ingest import UnsupportedDeckError, guess_company_name, ingest
 from .models import AnalysisResult
+from .notify import notify_report_ready
 from .render import LayoutOverflowError, render_one_pager
 
 SUPPORTED_SUFFIXES = (".pdf", ".pptx")
@@ -64,6 +65,11 @@ def analyze(
     logo: Optional[Path] = typer.Option(
         None, "--logo", help="Optional logo image for the report header."
     ),
+    no_email: bool = typer.Option(
+        False,
+        "--no-email",
+        help="Skip the email notification even when Resend is configured.",
+    ),
 ) -> None:
     """Analyze DECK_PATH and write a one-page PDF report."""
     load_dotenv()
@@ -79,7 +85,9 @@ def analyze(
 
     content = _ingest(deck, include_images, log)
     analysis = _analyze(content, model, include_images, destination, log)
-    _render(analysis, destination, content, orientation, logo)
+    company = _render(analysis, destination, content, orientation, logo)
+    if not no_email:
+        _email(analysis, destination, company, deck.name, model, content.slide_count)
 
     _print_summary(analysis, destination)
 
@@ -143,7 +151,7 @@ def _render(
     content,
     orientation: str,
     logo: Optional[Path],
-) -> None:
+) -> str:
     company = guess_company_name(content.text, fallback=destination.stem)
     with console.status("Rendering one-pager..."):
         try:
@@ -157,6 +165,33 @@ def _render(
         except LayoutOverflowError as error:
             error_console.print(f"[bold red]Layout error:[/bold red] {error}")
             raise typer.Exit(1) from error
+    return company
+
+
+def _email(
+    analysis: AnalysisResult,
+    destination: Path,
+    company: str,
+    deck_filename: str,
+    model: str,
+    slide_count: int,
+) -> None:
+    """Best-effort notification; a mail problem never fails a finished run."""
+    with console.status("Emailing the report..."):
+        status = notify_report_ready(
+            analysis,
+            destination,
+            company_name=company,
+            deck_filename=deck_filename,
+            model=model,
+            slide_count=slide_count,
+        )
+    if status is None:
+        return
+    if status.startswith("Could not"):
+        error_console.print(f"[yellow]Warning:[/yellow] {status}")
+    else:
+        console.print(f"[green]OK[/green] {status}")
 
 
 # --------------------------------------------------------------------------- #

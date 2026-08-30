@@ -110,15 +110,26 @@ def test_index_advertises_only_supported_deck_types(client):
     assert ".docx" not in response.text
 
 
-def test_index_makes_no_email_or_sharing_claim(client):
-    """The app never forwards a deck anywhere; the page must not imply it does."""
+def test_disclosure_matches_reality_when_email_is_off(client):
+    """With no Resend key the page must not claim anything is emailed."""
     body = client.get("/", auth=AUTH).text.split("</head>", 1)[1]
 
     assert not re.search(r"[\w.+-]+@[\w-]+\.[\w.]+", body), (
         "an email address is displayed, implying decks are sent somewhere"
     )
-    assert "mailto:" not in body
     assert "not emailed or shared" in body
+
+
+def test_disclosure_names_the_recipients_when_email_is_on(client, monkeypatch):
+    """If reports are emailed, the uploader must be told before uploading."""
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+    monkeypatch.setenv("REPORT_EMAIL_TO", "Info@tencapital.group")
+
+    body = client.get("/", auth=AUTH).text.split("</head>", 1)[1]
+
+    assert "emailed to" in body
+    assert "Info@tencapital.group" in body
+    assert "not emailed or shared" not in body
 
 
 def test_missing_app_password_locks_the_app_down(client, monkeypatch):
