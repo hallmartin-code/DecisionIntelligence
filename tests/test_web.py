@@ -85,6 +85,29 @@ def test_healthz_needs_no_auth(client):
     assert response.json()["status"] == "ok"
 
 
+def test_healthz_reports_the_effective_upload_limit(client):
+    """A deployment enforcing an unexpected limit must be diagnosable.
+
+    The limit is settable by env var, so a stale or misconfigured deployment can
+    silently advertise a smaller size than the code default. Reporting it here
+    turns "why does it say 25 MB?" into one request.
+    """
+    import pitch_analyzer.web as web_module
+
+    body = client.get("/healthz").json()
+
+    assert body["max_upload_mb"] == web_module.MAX_UPLOAD_MB
+    assert body["max_upload_bytes"] == web_module.MAX_UPLOAD_BYTES
+    assert body["upload_limit_source"] in ("default", "environment")
+
+
+def test_the_code_default_is_50_mb():
+    """The shipped default, independent of whatever the environment sets."""
+    import pitch_analyzer.web as web_module
+
+    assert web_module.DEFAULT_MAX_UPLOAD_MB == 50
+
+
 def test_index_requires_credentials(client):
     assert client.get("/").status_code == 401
 

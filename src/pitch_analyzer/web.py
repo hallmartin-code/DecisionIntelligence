@@ -6,6 +6,7 @@ are on local disk. See `jobs.py` for the queue.
 
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 from contextlib import asynccontextmanager
@@ -26,10 +27,17 @@ from .notify import load_email_config
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 SUPPORTED_SUFFIXES = (".pdf", ".pptx")
 TEMPLATES_DIR = Path(__file__).resolve().parent / "web_templates"
 
-MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "50"))
+DEFAULT_MAX_UPLOAD_MB = 50
+#: True when the limit came from the environment rather than the code default.
+#: A deployment that sets this lower than the default silently shrinks the UI,
+#: which is invisible unless it is reported — see /healthz.
+UPLOAD_LIMIT_FROM_ENV = bool(os.environ.get("MAX_UPLOAD_MB", "").strip())
+MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB") or DEFAULT_MAX_UPLOAD_MB)
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 UPLOAD_CHUNK_BYTES = 1024 * 1024
 JOB_TTL_MINUTES = int(os.environ.get("JOB_TTL_MINUTES", "60"))
@@ -43,6 +51,16 @@ store = JobStore(max_workers=MAX_CONCURRENT_ANALYSES, ttl_minutes=JOB_TTL_MINUTE
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    source = "MAX_UPLOAD_MB env var" if UPLOAD_LIMIT_FROM_ENV else "code default"
+    logger.info("Upload limit: %s MB (from %s)", MAX_UPLOAD_MB, source)
+    if UPLOAD_LIMIT_FROM_ENV and MAX_UPLOAD_MB < DEFAULT_MAX_UPLOAD_MB:
+        logger.warning(
+            "MAX_UPLOAD_MB=%s is below the %s MB default — the upload form will "
+            "advertise and enforce the smaller value. Unset the variable to use "
+            "the default.",
+            MAX_UPLOAD_MB,
+            DEFAULT_MAX_UPLOAD_MB,
+        )
     yield
     store.shutdown()
 
@@ -142,8 +160,22 @@ def require_auth(
 
 @app.get("/healthz", include_in_schema=False)
 def healthz() -> JSONResponse:
-    """Unauthenticated health check for the platform."""
-    return JSONResponse({"status": "ok", "version": __version__})
+    """Unauthenticated health check, and the effective upload limit.
+
+    The limit is reported here so a deployment enforcing an unexpected value can
+    be diagnosed from one URL, without reading the container's logs.
+    """
+    return JSONResponse(
+        {
+            "status": "ok",
+            "version": __version__,
+            "max_upload_mb": MAX_UPLOAD_MB,
+            "max_upload_bytes": MAX_UPLOAD_BYTES,
+            "upload_limit_source": (
+                "environment" if UPLOAD_LIMIT_FROM_ENV else "default"
+            ),
+        }
+    )
 
 
 @app.get("/", response_class=HTMLResponse)

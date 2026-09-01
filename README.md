@@ -187,6 +187,27 @@ deployment is configuration only — no build script to write.
 
 Redeploy on every push to the default branch is Railway's default.
 
+### If the deployed app enforces the wrong upload limit
+
+`GET /healthz` reports the limit the running service is actually using, and
+where it came from — no credentials needed:
+
+```json
+{"status": "ok", "max_upload_mb": 50, "upload_limit_source": "default"}
+```
+
+- `"upload_limit_source": "environment"` with a value below 50 means a
+  **`MAX_UPLOAD_MB` variable is set on the service** and is overriding the code
+  default. Delete it under *Variables* (or set it to the size you want) and
+  redeploy. The service also logs a warning at startup when this happens.
+- `"upload_limit_source": "default"` but the wrong number means the deployment
+  is running **older code**. Check the deployed commit against `main` and
+  redeploy.
+
+The upload page, the client-side size check and the server all derive from this
+one value, so they cannot disagree with each other — if the page says 25 MB, the
+service is genuinely configured for 25 MB.
+
 ### What to know about this deployment
 
 - **Keep it at one replica.** Job state lives in the process, so a second
