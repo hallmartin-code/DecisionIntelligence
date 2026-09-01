@@ -29,7 +29,7 @@ load_dotenv()
 SUPPORTED_SUFFIXES = (".pdf", ".pptx")
 TEMPLATES_DIR = Path(__file__).resolve().parent / "web_templates"
 
-MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "25"))
+MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "40"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 JOB_TTL_MINUTES = int(os.environ.get("JOB_TTL_MINUTES", "60"))
 MAX_CONCURRENT_ANALYSES = int(os.environ.get("MAX_CONCURRENT_ANALYSES", "2"))
