@@ -17,7 +17,6 @@ dependencies = [
     "python-docx>=1.1.0",
     "Pillow>=10.0.0",
     "anthropic>=0.40.0",
-    "reportlab>=4.1.0",
     "rich>=13.7.0",
     "python-dotenv>=1.0.0",
     "pydantic>=2.6.0",
@@ -29,7 +28,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0.0"]
+# reportlab is test-only: the suite and samples/make_sample_deck.py use it to
+# synthesise PDFs. Nothing under src/ imports it, so it stays out of the
+# runtime set and out of the deployed image.
+dev = ["pytest>=8.0.0", "reportlab>=4.1.0"]
 
 [project.scripts]
 pitch-analyzer = "pitch_analyzer.cli:app"

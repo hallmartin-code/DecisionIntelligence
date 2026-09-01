@@ -1,10 +1,13 @@
+# Runtime dependencies. This file is what the deployment installs, so it must
+# contain everything src/ imports and nothing it does not — see
+# tests/test_requirements.py. Test-only packages live in requirements-dev.txt.
+
 typer>=0.12.0
 pdfplumber>=0.11.0
 python-pptx>=1.0.0
 python-docx>=1.1.0
 Pillow>=10.0.0
 anthropic>=0.40.0
-reportlab>=4.1.0
 rich>=13.7.0
 python-dotenv>=1.0.0
 pydantic>=2.6.0
@@ -15,6 +18,3 @@ uvicorn[standard]>=0.30.0
 jinja2>=3.1.0
 python-multipart>=0.0.9
 httpx>=0.27.0
-
-# dev / test
-pytest>=8.0.0

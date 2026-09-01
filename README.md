@@ -15,7 +15,7 @@ python -m venv .venv
 # source .venv/bin/activate     # macOS / Linux
 
 # 2. Install
-pip install -r requirements.txt
+pip install -r requirements.txt   # runtime only
 pip install -e .
 
 # 3. Configure your API key
@@ -326,16 +326,28 @@ ingest.py  →  analyze.py  →  render.py
 ## Development
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev]"        # or: pip install -r requirements-dev.txt
 pytest -v
 ```
 
-87 tests cover ingestion (generated PDF and PPTX fixtures), the analysis layer
+`requirements.txt` is the runtime set — it is what the deployment installs,
+so it holds only what `src/` imports. Test tooling lives in
+`requirements-dev.txt`, which includes the runtime file. `reportlab` is a dev
+dependency: the suite and `samples/make_sample_deck.py` use it to synthesise
+PDFs, and nothing under `src/` imports it.
+
+Splitting the two creates one hazard — importing a dev-only package from
+`src/`, which passes locally and fails only in production.
+`tests/test_requirements.py` compares every import under `src/` against
+the runtime file to catch that.
+
+140 tests cover ingestion (generated PDF and PPTX fixtures), the analysis layer
 (mocked Anthropic client, including both retry paths), rendering (page count,
 page size, content, the fit search, and the overflow guard), the document
-template, and the web app (auth, upload validation, the full job flow, job
-expiry, and error rendering). No test makes a network call — an autouse fixture
-fails any test that tries to construct a real Anthropic client.
+template, the web app (auth, upload validation, the full job flow, job expiry,
+and error rendering), the deployment config, and the dependency split. No test
+makes a network call — an autouse fixture fails any test that tries to
+construct a real Anthropic client.
 
 To regenerate the sample deck or the blank template:
 

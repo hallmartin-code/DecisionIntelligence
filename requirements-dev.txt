@@ -1,0 +1,12 @@
+# Development and test dependencies, on top of the runtime set.
+#
+#     pip install -r requirements-dev.txt
+#
+# Kept out of requirements.txt so the deployed image does not carry the test
+# tooling. reportlab is here because the tests and samples/make_sample_deck.py
+# use it to synthesise PDFs; nothing under src/ imports it.
+
+-r requirements.txt
+
+pytest>=8.0.0
+reportlab>=4.1.0
