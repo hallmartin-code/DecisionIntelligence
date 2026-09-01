@@ -213,7 +213,7 @@ def _print_summary(analysis: AnalysisResult, destination: Path) -> None:
     color = colors.get(analysis.recommendation, "yellow")
 
     console.print(
-        f"\n[bold {color}]{summary.recommendation.upper()}[/bold {color}] "
+        f"\n[bold {color}]{analysis.recommendation.upper()}[/bold {color}] "
         f"- {analysis.confidence_pct}% confidence "
         f"- weighted {analysis.weighted_overall:.1f}/10"
     )
