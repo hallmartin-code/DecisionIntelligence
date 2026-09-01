@@ -54,7 +54,9 @@ def analyze(
         False, "--verbose", "-v", help="Stream analysis progress to stdout."
     ),
     no_images: bool = typer.Option(
-        False, "--no-images", help="Skip image extraction (faster, less context)."
+        False,
+        "--no-images",
+        help="Analyse extracted text only — cheaper, and skips reading the PDF directly.",
     ),
     no_email: bool = typer.Option(
         False,
@@ -74,7 +76,7 @@ def analyze(
             console.print(f"  [dim]{message}[/dim]")
 
     content = _ingest(deck, include_images, log)
-    analysis = _analyze(content, model, include_images, destination, log)
+    analysis = _analyze(content, model, include_images, destination, log, deck)
     company = _render(analysis, destination, content)
     if not no_email:
         _email(analysis, destination, company, deck.name, model, content.slide_count)
@@ -105,11 +107,17 @@ def _ingest(deck: Path, include_images: bool, log):
     return content
 
 
-def _analyze(content, model: str, include_images: bool, destination: Path, log):
+def _analyze(
+    content, model: str, include_images: bool, destination: Path, log, deck: Path
+):
     with console.status(f"Analyzing with {model}..."):
         try:
             analysis = analyze_deck(
-                content, model=model, include_images=include_images, log=log
+                content,
+                model=model,
+                include_images=include_images,
+                log=log,
+                deck_path=deck,
             )
         except MissingAPIKeyError:
             error_console.print("Set ANTHROPIC_API_KEY in .env")

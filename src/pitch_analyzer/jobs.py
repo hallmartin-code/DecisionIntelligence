@@ -233,6 +233,7 @@ class JobStore:
                 api_key=api_key,
                 include_images=job.include_images,
                 log=job.log.append,
+                deck_path=job.deck_path,
             )
             job.company_name = analysis.company_name or job.company_name
             job.recommendation = analysis.recommendation

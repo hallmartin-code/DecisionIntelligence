@@ -62,7 +62,7 @@ pitch-analyzer analyze <DECK_PATH> [OPTIONS]
 | `--output` / `-o` PATH | Output path. Defaults to `<deck_stem>_analysis.docx`. |
 | `--model TEXT` | Override the LLM model. Default `claude-sonnet-4-5`. |
 | `--verbose` / `-v` | Stream analysis progress to stdout. |
-| `--no-images` | Skip image extraction — faster and cheaper, less context. |
+| `--no-images` | Analyse extracted text only — cheaper, and skips reading the PDF directly. |
 | `--no-email` | Skip the email notification for this run. |
 
 `DECK_PATH` must be `.pdf` or `.pptx`; anything else is rejected before any API
@@ -173,6 +173,8 @@ deployment is configuration only — no build script to write.
    | `APP_PASSWORD` | yes | Anything you like; this is the login password |
    | `APP_USERNAME` | no | Defaults to `ten` |
    | `MAX_UPLOAD_MB` | no | Defaults to `50` |
+   | `USE_FILES_API` | no | `0` disables reading PDFs natively |
+   | `USE_CODE_EXECUTION` | no | `0` disables the model's Python sandbox |
    | `JOB_TTL_MINUTES` | no | Defaults to `60` |
    | `MAX_CONCURRENT_ANALYSES` | no | Defaults to `2` |
    | `RESEND_API_KEY` | no | Enables emailing each report (see above) |
@@ -292,22 +294,62 @@ scanning the document sees the problems without reading it.
 ## How it works
 
 ```
-ingest.py  →  analyze.py  →  render.py
-  PDF/PPTX     Claude API      python-docx
+ingest.py  →  files.py  →  analyze.py  →  render.py
+  PDF/PPTX     Files API    Claude API     python-docx
+                            + sandbox
 ```
 
 1. **`ingest.py`** — pulls per-slide text (and tables) with `pdfplumber` or
    `python-pptx`, prefixing each slide with a `[Slide N]` marker so the model can
    cite slide numbers. Up to 10 slide images (first, last, and evenly sampled)
    are rendered to JPEG at 1024px wide for the vision request.
-2. **`analyze.py`** — sends images then text to the Messages API and validates the
-   response against the Pydantic schema in `models.py`. A malformed response is
-   retried once with an explicit correction; after two failures the raw response
-   is written to `<output>_raw.txt`. Rate limits are retried three times with
-   exponential backoff.
-3. **`render.py`** — builds the .docx with python-docx, applying formatting
+2. **`files.py`** — uploads a PDF deck to the Files API so the model reads the
+   file itself rather than our extraction of it. See
+   [Reading the deck directly](#reading-the-deck-directly).
+3. **`analyze.py`** — sends the deck to the Messages API with the code execution
+   tool attached, and validates the response against the Pydantic schema in
+   `models.py`. A malformed response is retried once with an explicit
+   correction; after two failures the raw response is written to
+   `<output>_raw.txt`. Rate limits are retried three times with exponential
+   backoff.
+4. **`render.py`** — builds the .docx with python-docx, applying formatting
    directly to runs and cells so the result does not depend on which template
    Word opens it with.
+
+### Reading the deck directly
+
+A PDF deck is uploaded to the Files API and sent as a `document` block, so the
+model sees the pages as laid out — charts, diagrams and slide imagery included
+— instead of the flattened text `pdfplumber` can recover. In a pitch deck the
+argument frequently lives in a chart, so this is the main quality lever
+available. The upload is given a one-hour expiry and deleted as soon as the run
+ends; uploads are readable by any API key in the same workspace, so they are not
+left lying around.
+
+The model is also given the **code execution tool**, a server-side Python
+sandbox. The prompt has always asked it to check the source's arithmetic —
+whether a market size reconciles, whether runway covers the milestone dates,
+what the probability-weighted multiples actually come to. Without a sandbox it
+could only do that in its head, which is precisely the kind of claim the report
+exists to audit. It now computes those answers and writes the finding, not the
+method, into the report. The sandbox has no internet access.
+
+Neither feature needs a beta header. Both are on by default and either can be
+switched off with `USE_FILES_API=0` or `USE_CODE_EXECUTION=0`.
+
+**Where it falls back to extracted text**, automatically and with a line in the
+job log each time:
+
+| Situation | Why |
+|---|---|
+| A `.pptx` deck | There is no `document` block type for PowerPoint |
+| More than 35 pages | Every page costs 1,500–3,000 text tokens *plus* image tokens. A 10-page sample measured ~3,750/page, so a longer deck exhausts the context before the API's own 100-page limit |
+| `--no-images` / images off | That flag asks for the cheap run, and reading the PDF renders every page as an image |
+| The upload fails | A Files API outage should cost fidelity, not the run |
+| The API returns a 400 on the request | Large PDFs can be rejected even under the page limit; the request is retried once without the attachment |
+
+`.pptx` decks and long decks therefore behave exactly as they did before this
+change.
 
 ### Errors
 

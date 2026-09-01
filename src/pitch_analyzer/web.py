@@ -21,7 +21,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
 from . import __version__
-from .analyze import DEFAULT_MODEL
+from .analyze import DEFAULT_MODEL, env_flag
 from .jobs import JobStore
 from .notify import load_email_config
 
@@ -174,6 +174,10 @@ def healthz() -> JSONResponse:
             "upload_limit_source": (
                 "environment" if UPLOAD_LIMIT_FROM_ENV else "default"
             ),
+            # Reported for the same reason as the upload limit: whether a
+            # deployment is actually using these is otherwise invisible.
+            "files_api": env_flag("USE_FILES_API"),
+            "code_execution": env_flag("USE_CODE_EXECUTION"),
         }
     )
 
