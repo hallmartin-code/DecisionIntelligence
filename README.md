@@ -187,6 +187,27 @@ deployment is configuration only — no build script to write.
 
 Redeploy on every push to the default branch is Railway's default.
 
+### If the healthcheck fails after a successful build
+
+`1/1 replicas never became healthy` means the image built and pushed but
+nothing answered on `/healthz`. Two causes, distinguishable from the deploy
+logs:
+
+- **A usage error from uvicorn, before any application output.** The start
+  command must survive an unset `PORT`. With a bare `$PORT`, the shell drops
+  the empty word and uvicorn reads the *next* flag as the port number, exits,
+  and never binds — so the logs carry no application traceback at all. Both
+  `railway.json` and the `Procfile` use `${PORT:-8000}`, and
+  `tests/test_deploy_config.py` boots the real start command with `PORT` unset
+  to keep it that way.
+- **An application traceback.** Something failed at import. Reproduce it with
+  the deployed dependency set rather than your working venv: the requirements
+  are floors, not pins, so a fresh install resolves newer releases than a
+  long-lived local environment has.
+
+`healthcheckTimeout` is 300s. Do not lower it much — it covers the container
+cold start, not just the request.
+
 ### If the deployed app enforces the wrong upload limit
 
 `GET /healthz` reports the limit the running service is actually using, and

@@ -1,1 +1,1 @@
-web: uvicorn pitch_analyzer.web:app --app-dir src --host 0.0.0.0 --port ${PORT:-8000}
+web: uvicorn pitch_analyzer.web:app --app-dir src --host 0.0.0.0 --port ${PORT:-8000} --timeout-keep-alive 65
