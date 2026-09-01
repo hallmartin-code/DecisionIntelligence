@@ -29,8 +29,9 @@ load_dotenv()
 SUPPORTED_SUFFIXES = (".pdf", ".pptx")
 TEMPLATES_DIR = Path(__file__).resolve().parent / "web_templates"
 
-MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "40"))
+MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "50"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+UPLOAD_CHUNK_BYTES = 1024 * 1024
 JOB_TTL_MINUTES = int(os.environ.get("JOB_TTL_MINUTES", "60"))
 MAX_CONCURRENT_ANALYSES = int(os.environ.get("MAX_CONCURRENT_ANALYSES", "2"))
 
@@ -179,14 +180,9 @@ async def submit_analysis(
             detail=f"Unsupported file type '{suffix or filename}'. Expected .pdf or .pptx.",
         )
 
-    payload = await deck.read()
+    payload = await _read_capped(deck)
     if not payload:
         raise HTTPException(status_code=400, detail="The uploaded file is empty.")
-    if len(payload) > MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"Deck is larger than the {MAX_UPLOAD_MB} MB limit.",
-        )
 
     store.sweep()
     job = store.submit(
@@ -201,6 +197,26 @@ async def submit_analysis(
     return HTMLResponse(
         status_code=303, headers={"Location": f"/jobs/{job.id}"}, content=""
     )
+
+
+async def _read_capped(deck: UploadFile) -> bytes:
+    """Read the upload, refusing it as soon as it passes the limit.
+
+    Reading the whole body first and measuring afterwards means an oversized
+    upload is fully buffered before it is rejected, so memory use is set by
+    whatever was sent rather than by the limit. Reading in chunks bounds it.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await deck.read(UPLOAD_CHUNK_BYTES):
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Deck is larger than the {MAX_UPLOAD_MB} MB limit.",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 @app.get("/jobs/{job_id}", response_class=HTMLResponse)

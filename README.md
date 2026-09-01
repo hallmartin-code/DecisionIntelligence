@@ -172,7 +172,7 @@ deployment is configuration only — no build script to write.
    | `ANTHROPIC_API_KEY` | yes | From <https://console.anthropic.com> → API keys |
    | `APP_PASSWORD` | yes | Anything you like; this is the login password |
    | `APP_USERNAME` | no | Defaults to `ten` |
-   | `MAX_UPLOAD_MB` | no | Defaults to `40` |
+   | `MAX_UPLOAD_MB` | no | Defaults to `50` |
    | `JOB_TTL_MINUTES` | no | Defaults to `60` |
    | `MAX_CONCURRENT_ANALYSES` | no | Defaults to `2` |
    | `RESEND_API_KEY` | no | Enables emailing each report (see above) |
