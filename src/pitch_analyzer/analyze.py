@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from .config import env_flag
 from .files import (
     MAX_NATIVE_PAGES,
     FileUploadError,
@@ -26,19 +27,15 @@ DEFAULT_MODEL = "claude-sonnet-4-5"
 MAX_TOKENS = 48000  # the full report is long; leaves headroom over a ~25k typical
 RATE_LIMIT_ATTEMPTS = 3
 BACKOFF_BASE_SECONDS = 2.0
+#: How many times a paused turn may be resumed before giving up. The API
+#: pauses a long turn and expects the response handed back to continue it;
+#: a sandbox session can pause more than once on a dense deck.
+MAX_TURN_CONTINUATIONS = 6
 
 #: Server-side Python sandbox. The prompt asks the model to check the deck's
 #: arithmetic; without this it can only do that in its head, which is exactly
 #: the kind of claim it is being asked to audit. Needs no beta header.
 CODE_EXECUTION_TOOL = {"type": "code_execution_20250825", "name": "code_execution"}
-
-
-def env_flag(name: str, default: bool = True) -> bool:
-    """Read an on/off switch, so either half can be disabled in a deployment."""
-    raw = os.environ.get(name, "").strip().lower()
-    if not raw:
-        return default
-    return raw not in ("0", "false", "no", "off")
 
 
 def _correction_message(problem: str) -> str:
@@ -309,20 +306,41 @@ def _request_with_backoff(
     # and older stubs in the tests do not accept the argument at all.
     extra = {"tools": tools} if tools else {}
 
+    conversation = list(messages)
+
     for attempt in range(RATE_LIMIT_ATTEMPTS):
         try:
             # The report is long enough that the SDK refuses a non-streaming
             # request at this max_tokens, and a streamed call also survives a
             # run that takes several minutes. Code execution runs server-side
-            # inside this same call, so there is no client-side tool loop.
-            with client.messages.stream(
-                model=model,
-                max_tokens=MAX_TOKENS,
-                system=SYSTEM_PROMPT,
-                messages=messages,
-                **extra,
-            ) as stream:
-                return _response_text(stream.get_final_message())
+            # inside this same call, so there is no client-side tool loop —
+            # but a long turn can be paused and handed back to be resumed.
+            for continuation in range(MAX_TURN_CONTINUATIONS + 1):
+                with client.messages.stream(
+                    model=model,
+                    max_tokens=MAX_TOKENS,
+                    system=SYSTEM_PROMPT,
+                    messages=conversation,
+                    **extra,
+                ) as stream:
+                    message = stream.get_final_message()
+
+                if getattr(message, "stop_reason", None) != "pause_turn":
+                    return _response_text(message)
+
+                # Without this the paused turn reads as a finished one, and
+                # what comes back is the model's opening narration rather than
+                # the report.
+                emit(f"The turn paused; resuming it ({continuation + 1}).")
+                conversation = conversation + [
+                    {"role": "assistant", "content": message.content}
+                ]
+
+            emit(
+                f"The turn was still paused after {MAX_TURN_CONTINUATIONS} "
+                "resumptions; using what it produced."
+            )
+            return _response_text(message)
         except anthropic.RateLimitError:
             if attempt == RATE_LIMIT_ATTEMPTS - 1:
                 raise RateLimitExceededError(

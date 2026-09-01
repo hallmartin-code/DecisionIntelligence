@@ -21,7 +21,13 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
 from . import __version__
-from .analyze import DEFAULT_MODEL, env_flag
+from .analyze import DEFAULT_MODEL
+from .config import (
+    came_from_env,
+    config_warnings,
+    env_flag,
+    env_int,
+)
 from .jobs import JobStore
 from .notify import load_email_config
 
@@ -33,15 +39,16 @@ SUPPORTED_SUFFIXES = (".pdf", ".pptx")
 TEMPLATES_DIR = Path(__file__).resolve().parent / "web_templates"
 
 DEFAULT_MAX_UPLOAD_MB = 50
+MAX_UPLOAD_MB = env_int("MAX_UPLOAD_MB", DEFAULT_MAX_UPLOAD_MB)
 #: True when the limit came from the environment rather than the code default.
 #: A deployment that sets this lower than the default silently shrinks the UI,
-#: which is invisible unless it is reported — see /healthz.
-UPLOAD_LIMIT_FROM_ENV = bool(os.environ.get("MAX_UPLOAD_MB", "").strip())
-MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB") or DEFAULT_MAX_UPLOAD_MB)
+#: which is invisible unless it is reported — see /healthz. Read after parsing,
+#: so a rejected value reports as the default it actually fell back to.
+UPLOAD_LIMIT_FROM_ENV = came_from_env("MAX_UPLOAD_MB")
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 UPLOAD_CHUNK_BYTES = 1024 * 1024
-JOB_TTL_MINUTES = int(os.environ.get("JOB_TTL_MINUTES", "60"))
-MAX_CONCURRENT_ANALYSES = int(os.environ.get("MAX_CONCURRENT_ANALYSES", "2"))
+JOB_TTL_MINUTES = env_int("JOB_TTL_MINUTES", 60)
+MAX_CONCURRENT_ANALYSES = env_int("MAX_CONCURRENT_ANALYSES", 2)
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 security = HTTPBasic(auto_error=False)
@@ -61,6 +68,8 @@ async def lifespan(_app: FastAPI):
             MAX_UPLOAD_MB,
             DEFAULT_MAX_UPLOAD_MB,
         )
+    for warning in config_warnings():
+        logger.warning("%s", warning)
     yield
     store.shutdown()
 
@@ -178,6 +187,8 @@ def healthz() -> JSONResponse:
             # deployment is actually using these is otherwise invisible.
             "files_api": env_flag("USE_FILES_API"),
             "code_execution": env_flag("USE_CODE_EXECUTION"),
+            # An environment value that could not be parsed. Empty is healthy.
+            "config_warnings": config_warnings(),
         }
     )
 

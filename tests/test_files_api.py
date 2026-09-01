@@ -356,3 +356,57 @@ def test_healthz_reports_whether_the_features_are_on(monkeypatch) -> None:
     with TestClient(web.app) as client:
         body = client.get("/healthz").json()
     assert body["files_api"] is True and body["code_execution"] is False
+
+
+def _paused(text: str) -> MagicMock:
+    stream = _stream(text)
+    stream.__enter__.return_value.get_final_message.return_value.stop_reason = (
+        "pause_turn"
+    )
+    return stream
+
+
+def _finished(text: str) -> MagicMock:
+    stream = _stream(text)
+    stream.__enter__.return_value.get_final_message.return_value.stop_reason = "end_turn"
+    return stream
+
+
+def test_a_paused_turn_is_resumed_not_treated_as_the_answer(deck, analysis_payload):
+    """A long sandbox turn pauses; taking that as the answer yields narration."""
+    client = MagicMock()
+    client.messages.stream.side_effect = [
+        _paused("I'll start by checking the market sizing arithmetic."),
+        _finished(json.dumps(analysis_payload)),
+    ]
+    logged: list[str] = []
+
+    result = analyze_deck(deck, client=client, log=logged.append)
+
+    assert result.recommendation == "Investigate Further"
+    assert client.messages.stream.call_count == 2
+    # The paused turn is handed back so the model can continue it.
+    resumed = client.messages.stream.call_args_list[1].kwargs["messages"]
+    assert resumed[-1]["role"] == "assistant"
+    assert any("paused" in line for line in logged)
+
+
+def test_resumption_is_bounded() -> None:
+    """A turn that never finishes must not loop forever.
+
+    Tested against the request helper rather than analyze_deck, because the
+    latter's JSON-correction retry runs the whole request a second time.
+    """
+    from pitch_analyzer.analyze import MAX_TURN_CONTINUATIONS, _request_with_backoff
+
+    client = MagicMock()
+    client.messages.stream.side_effect = [
+        _paused("still working") for _ in range(MAX_TURN_CONTINUATIONS + 5)
+    ]
+    logged: list[str] = []
+
+    text = _request_with_backoff(client, "model", [], logged.append, None)
+
+    assert client.messages.stream.call_count == MAX_TURN_CONTINUATIONS + 1
+    assert text == "still working"
+    assert any("still paused" in line for line in logged)

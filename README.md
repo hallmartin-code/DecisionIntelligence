@@ -210,6 +210,25 @@ logs:
 `healthcheckTimeout` is 300s. Do not lower it much — it covers the container
 cold start, not just the request.
 
+### If the container starts and immediately dies
+
+A healthcheck stage far shorter than `healthcheckTimeout` means the container
+exited and the platform stopped waiting — not that the window elapsed. The
+usual cause is a setting typed into the Variables tab that is not a whole
+number: `MAX_UPLOAD_MB=50MB`, `JOB_TTL_MINUTES=60m`.
+
+These are no longer fatal. An unparseable value falls back to its default, logs
+a warning at startup, and is listed in `config_warnings` on `/healthz`:
+
+```json
+{"status": "ok", "max_upload_mb": 50,
+ "config_warnings": ["MAX_UPLOAD_MB='50MB' is not a whole number - using 50 instead."]}
+```
+
+An empty `config_warnings` array means every value was read as written. A
+non-empty one means the service is running on defaults for those settings and
+the variable needs correcting.
+
 ### If the deployed app enforces the wrong upload limit
 
 `GET /healthz` reports the limit the running service is actually using, and
