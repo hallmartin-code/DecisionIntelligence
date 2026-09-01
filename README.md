@@ -1,12 +1,8 @@
 # Pitch Deck Decision Intelligence Analyzer
 
-Turn an investor pitch deck (`.pdf` or `.pptx`) into a single-page, print-ready
-Decision Intelligence report — from the command line, or as a web app.
-
-![Example one-pager](samples/sample_report.png)
-
-*Generated from [`samples/sample_deck.pdf`](samples/sample_deck.pdf) — a synthetic
-deck included for smoke-testing.*
+Turn an investor pitch deck (`.pdf` or `.pptx`) into a full **Decision
+Intelligence Assessment** — an editable Word report written for an investment
+committee — from the command line, or as a web app.
 
 ---
 
@@ -26,7 +22,7 @@ pip install -e .
 cp .env.example .env            # then edit .env and set ANTHROPIC_API_KEY
 
 # 4. Run
-pitch-analyzer analyze samples/sample_deck.pdf -o report.pdf
+pitch-analyzer analyze samples/sample_deck.pdf -o report.docx
 ```
 
 Output:
@@ -35,11 +31,12 @@ Output:
 OK Read 10 slide(s), 3,057 characters, 10 image(s).
 OK Analysis complete.
 
-INVESTIGATE FURTHER - 65% confidence - weighted 6.5/10
-OK Report written to report.pdf
+INVESTIGATE FURTHER - 62% confidence - weighted 4.6/10
+OK Report written to report.docx
 ```
 
-A run takes roughly 2–4 minutes, most of it the model call.
+A run takes roughly 5–12 minutes, almost all of it the model call. The report is
+long, so the request is streamed to survive that.
 
 ### Run the web app locally
 
@@ -62,12 +59,10 @@ pitch-analyzer analyze <DECK_PATH> [OPTIONS]
 
 | Option | Description |
 |---|---|
-| `--output` / `-o` PATH | Output PDF path. Defaults to `<deck_stem>_analysis.pdf`. |
-| `--orient landscape\|portrait` | Page orientation. Default `landscape`. |
+| `--output` / `-o` PATH | Output path. Defaults to `<deck_stem>_analysis.docx`. |
 | `--model TEXT` | Override the LLM model. Default `claude-sonnet-4-5`. |
 | `--verbose` / `-v` | Stream analysis progress to stdout. |
 | `--no-images` | Skip image extraction — faster and cheaper, less context. |
-| `--logo PATH` | Optional logo image for the report header. |
 | `--no-email` | Skip the email notification for this run. |
 
 `DECK_PATH` must be `.pdf` or `.pptx`; anything else is rejected before any API
@@ -92,7 +87,7 @@ Because an analysis takes minutes — far too long to hold an HTTP request open 
 uploads become **jobs**: submit, poll, download.
 
 The upload page validates the file client-side (extension and size) before
-anything is sent, supports drag-and-drop, and keeps orientation / model /
+anything is sent, supports drag-and-drop, and keeps model and
 image-context behind an **Analysis options** disclosure so the default path is a
 single click. The job page polls for progress, shows the log as it accumulates,
 and ends on a colour-coded verdict with the weighted score, confidence, and
@@ -101,11 +96,11 @@ clients.
 
 | Route | Auth | Purpose |
 |---|---|---|
-| `GET /` | yes | Upload form (deck, orientation, model, images on/off) |
+| `GET /` | yes | Upload form (deck, model, images on/off) |
 | `POST /analyze` | yes | Submits a job. Returns `303` to the job page, or `202` + JSON when `Accept: application/json` |
 | `GET /jobs/{id}` | yes | Live progress page |
 | `GET /jobs/{id}/status` | yes | JSON job status for polling |
-| `GET /jobs/{id}/report.pdf` | yes | The finished one-pager |
+| `GET /jobs/{id}/report.docx` | yes | The finished report |
 | `GET /healthz` | no | Platform health check |
 
 Scriptable end to end:
@@ -116,8 +111,8 @@ JOB=$(curl -s -u ten:$APP_PASSWORD -H "Accept: application/json" \
   https://your-app.up.railway.app/analyze | jq -r .job_id)
 
 curl -s -u ten:$APP_PASSWORD https://your-app.up.railway.app/jobs/$JOB/status
-curl -s -u ten:$APP_PASSWORD -o report.pdf \
-  https://your-app.up.railway.app/jobs/$JOB/report.pdf
+curl -s -u ten:$APP_PASSWORD -o report.docx \
+  https://your-app.up.railway.app/jobs/$JOB/report.docx
 ```
 
 ### Authentication
@@ -134,7 +129,7 @@ unprotected.
 ## Email notifications
 
 Every finished analysis is emailed to the team through [Resend](https://resend.com),
-with the one-pager attached as a PDF and the verdict, thesis, strengths,
+with the report attached as a Word document and the verdict, thesis, strengths,
 concerns, top risks, and diligence questions in the body (HTML and plain text).
 
 Set `RESEND_API_KEY` to switch it on; leave it unset and nothing is sent.
@@ -216,61 +211,39 @@ Redeploy on every push to the default branch is Railway's default.
 ## Document template
 
 [`templates/report_structure.md`](templates/report_structure.md) is the
-canonical structure for every report the app produces — page setup, the five
-bands, every field with its placeholder, character budget and allowed value set,
-and the content rules. Amend that document first when the report format needs to
-change.
-
-[`templates/report_template.pdf`](templates/report_template.pdf) is the same
-structure rendered as a blank, placeholder-filled one-pager (portrait variant
-alongside it). It goes through the real renderer, so it always matches live
-output. Regenerate both with:
-
-```bash
-python templates/make_report_template.py
-```
-
-`tests/test_template.py` fails if the template or the structure document drifts
-out of sync with the renderer.
+canonical structure for every report the app produces — page setup, the palette
+and type scale, all seven parts, every table's columns, the closed vocabularies,
+and the content rules. It was derived from a hand-written TEN Capital assessment
+and is the file to amend first when the report format needs to change.
 
 ---
 
 ## What the report contains
 
-The one-pager is laid out in five bands:
+Seven parts, in order:
 
-| Band | Content |
+| Part | Content |
 |---|---|
-| Header | Company name (inferred from the title slide), date, colour-coded recommendation badge with confidence |
-| Scorecard | All 10 category scores as red→green gradient bars, plus weighted overall and decision quality |
-| Executive summary | Investment thesis, three strengths, three concerns |
-| Scenarios | Best / base / worst probability bars, drivers, and the expected risk-adjusted outcome |
-| Top risks | Category, description, probability/impact, mitigation |
-| Diligence questions | The top five questions for the founder meeting |
-| Footer | Bull case, bear case, recommendation, confidence, attribution |
+| Masthead | Company, one-line descriptor, deal-metadata grid, recommendation callout, and a scoring-fairness note when the source is thin |
+| 1 Executive Summary | Recommendation, confidence, thesis, three strengths, three concerns |
+| 2 Decision Intelligence Assessment | Ten numbered sections scored 0–10, with sub-sections and diligence questions. Carries the market-sizing, competitor, evidence, sensitivity, risk-register and assumption tables |
+| 3 Decision Scenario Analysis | Best / base / worst with drivers and a probability-weighted multiple table |
+| 4 Investment Committee View | Bull case, bear case, and what would change the assessment |
+| 5 Decision Intelligence Scorecard | Weighted scorecard, composite indices, optional peer comparison |
+| 6 Final Recommendation | How to approach it, five diligence questions, gating milestones |
+| 7 Summary Investment Memo | Nine fields, for a reader who opens nothing else |
 
-The badge is green for **Invest**, amber for **Investigate Further**, red for
-**Pass**.
+### Two things the format guarantees
 
-### Fitting one page
+**The arithmetic closes.** Category weights are fixed in code, and the weighted
+total is computed from the section scores rather than taken from the model — so
+the scorecard can never disagree with the sections above it.
 
-The report is always exactly one page. Before drawing, every band is measured;
-if the stack does not fit, the renderer re-lays the page at a smaller type size
-(8pt down to a 5.5pt floor, in 0.5pt steps). At each size it finds the largest
-text budget that still fits, so **type size is only spent once text has been** —
-a normal-length analysis renders at 8pt with nothing clipped.
-
-Two things are bounded by design, and both are disclosed on the page rather than
-dropped silently:
-
-- The risks table shows four rows; any remainder is reported as
-  *"N further risks identified — see the full analysis."*
-- Long free-text fields are clipped with an ellipsis when the analysis is far
-  longer than a page can carry.
-
-If the content cannot fit even at 5.5pt, the renderer raises
-`LayoutOverflowError` naming the offending section rather than producing a
-silently broken page.
+**Absent is not the same as bad.** The document separates information missing
+because the source format cannot carry it (noted, not scored against the
+company) from claims that are inaccurate or self-contradictory within the
+material provided (scored). Adverse findings are set in crimson, so a reader
+scanning the document sees the problems without reading it.
 
 ---
 
@@ -278,7 +251,7 @@ silently broken page.
 
 ```
 ingest.py  →  analyze.py  →  render.py
-  PDF/PPTX     Claude API      ReportLab
+  PDF/PPTX     Claude API      python-docx
 ```
 
 1. **`ingest.py`** — pulls per-slide text (and tables) with `pdfplumber` or
@@ -290,8 +263,9 @@ ingest.py  →  analyze.py  →  render.py
    retried once with an explicit correction; after two failures the raw response
    is written to `<output>_raw.txt`. Rate limits are retried three times with
    exponential backoff.
-3. **`render.py`** — draws the one-pager with ReportLab using only built-in
-   Helvetica, so there are no font or image dependencies.
+3. **`render.py`** — builds the .docx with python-docx, applying formatting
+   directly to runs and cells so the result does not depend on which template
+   Word opens it with.
 
 ### Errors
 
@@ -303,7 +277,7 @@ ingest.py  →  analyze.py  →  render.py
 | API auth failure | Prints `Set ANTHROPIC_API_KEY in .env`, exit 1 |
 | API rate limit | Retries ×3 with exponential backoff, then exit 1 |
 | JSON parse failure after 2 retries | Saves `<output>_raw.txt`, exit 1 |
-| Layout overflow at 5.5pt | `LayoutOverflowError` naming the section, exit 1 |
+| Report could not be built | `RenderError`, exit 1 |
 
 ---
 
@@ -335,7 +309,8 @@ src/pitch_analyzer/
 ├── models.py        Pydantic schema for the analysis
 ├── ingest.py        PDF / PPTX text + image extraction
 ├── analyze.py       Anthropic API call, retries, JSON validation
-├── render.py        ReportLab one-pager and fit guard
+├── render.py        Word (.docx) report builder
+├── prompt.py        System prompt and output schema
 ├── cli.py           Typer entry point
 ├── jobs.py          Background job queue for the web app
 ├── notify.py        Resend email delivery (best-effort)
@@ -345,12 +320,9 @@ src/pitch_analyzer/
 Procfile · railway.json · .python-version    Railway deployment config
 
 templates/
-├── report_structure.md        Canonical document structure (edit this first)
-├── make_report_template.py    Renders the blank template
-└── report_template.pdf        Blank one-pager, landscape + portrait
+└── report_structure.md        Canonical document structure (edit this first)
 
 samples/
 ├── make_sample_deck.py        Builds the synthetic deck
-├── sample_deck.pdf            Input for smoke tests
-└── sample_report.pdf/.png     Example output
+└── sample_deck.pdf            Input for smoke tests
 ```

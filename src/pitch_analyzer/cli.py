@@ -19,13 +19,13 @@ from .analyze import (
 from .ingest import UnsupportedDeckError, guess_company_name, ingest
 from .models import AnalysisResult
 from .notify import notify_report_ready
-from .render import LayoutOverflowError, render_one_pager
+from .render import RenderError, render_report
 
 SUPPORTED_SUFFIXES = (".pdf", ".pptx")
 
 app = typer.Typer(
     add_completion=False,
-    help="Turn an investor pitch deck into a one-page Decision Intelligence report.",
+    help="Turn an investor pitch deck into a Decision Intelligence report.",
 )
 console = Console()
 error_console = Console(stderr=True)
@@ -47,13 +47,7 @@ def analyze(
         None,
         "--output",
         "-o",
-        help="Output PDF path. Defaults to <deck_stem>_analysis.pdf.",
-    ),
-    orient: str = typer.Option(
-        "landscape",
-        "--orient",
-        help="Page orientation.",
-        case_sensitive=False,
+        help="Output .docx path. Defaults to <deck_stem>_analysis.docx.",
     ),
     model: str = typer.Option(DEFAULT_MODEL, "--model", help="Override the LLM model."),
     verbose: bool = typer.Option(
@@ -62,21 +56,17 @@ def analyze(
     no_images: bool = typer.Option(
         False, "--no-images", help="Skip image extraction (faster, less context)."
     ),
-    logo: Optional[Path] = typer.Option(
-        None, "--logo", help="Optional logo image for the report header."
-    ),
     no_email: bool = typer.Option(
         False,
         "--no-email",
         help="Skip the email notification even when Resend is configured.",
     ),
 ) -> None:
-    """Analyze DECK_PATH and write a one-page PDF report."""
+    """Analyze DECK_PATH and write a Decision Intelligence report (.docx)."""
     load_dotenv()
 
     deck = _validate_deck_path(deck_path)
-    orientation = _validate_orientation(orient)
-    destination = output or deck.with_name(f"{deck.stem}_analysis.pdf")
+    destination = output or deck.with_name(f"{deck.stem}_analysis.docx")
     include_images = not no_images
 
     def log(message: str) -> None:
@@ -85,7 +75,7 @@ def analyze(
 
     content = _ingest(deck, include_images, log)
     analysis = _analyze(content, model, include_images, destination, log)
-    company = _render(analysis, destination, content, orientation, logo)
+    company = _render(analysis, destination, content)
     if not no_email:
         _email(analysis, destination, company, deck.name, model, content.slide_count)
 
@@ -145,25 +135,15 @@ def _analyze(content, model: str, include_images: bool, destination: Path, log):
     return analysis
 
 
-def _render(
-    analysis: AnalysisResult,
-    destination: Path,
-    content,
-    orientation: str,
-    logo: Optional[Path],
-) -> str:
-    company = guess_company_name(content.text, fallback=destination.stem)
-    with console.status("Rendering one-pager..."):
+def _render(analysis: AnalysisResult, destination: Path, content) -> str:
+    company = analysis.company_name or guess_company_name(
+        content.text, fallback=destination.stem
+    )
+    with console.status("Building the report..."):
         try:
-            render_one_pager(
-                analysis,
-                destination,
-                company_name=company,
-                orientation=orientation,
-                logo_path=logo,
-            )
-        except LayoutOverflowError as error:
-            error_console.print(f"[bold red]Layout error:[/bold red] {error}")
+            render_report(analysis, destination)
+        except RenderError as error:
+            error_console.print(f"[bold red]Render error:[/bold red] {error}")
             raise typer.Exit(1) from error
     return company
 
@@ -217,15 +197,6 @@ def _validate_deck_path(deck_path: Path) -> Path:
     return deck_path
 
 
-def _validate_orientation(value: str) -> str:
-    orientation = value.lower()
-    if orientation not in ("landscape", "portrait"):
-        raise typer.BadParameter(
-            "Orientation must be 'landscape' or 'portrait'.", param_hint="--orient"
-        )
-    return orientation
-
-
 def _is_auth_error(error: Exception) -> bool:
     try:
         import anthropic
@@ -238,14 +209,13 @@ def _is_auth_error(error: Exception) -> bool:
 
 
 def _print_summary(analysis: AnalysisResult, destination: Path) -> None:
-    summary = analysis.executive_summary
     colors = {"Invest": "green", "Investigate Further": "yellow", "Pass": "red"}
-    color = colors.get(summary.recommendation, "yellow")
+    color = colors.get(analysis.recommendation, "yellow")
 
     console.print(
         f"\n[bold {color}]{summary.recommendation.upper()}[/bold {color}] "
-        f"- {summary.confidence_pct}% confidence "
-        f"- weighted {analysis.scores.weighted_overall:.1f}/10"
+        f"- {analysis.confidence_pct}% confidence "
+        f"- weighted {analysis.weighted_overall:.1f}/10"
     )
     console.print(f"[green]OK[/green] Report written to [bold]{destination}[/bold]")
 

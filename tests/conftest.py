@@ -1,4 +1,4 @@
-"""Shared fixtures: a complete, schema-valid analysis payload."""
+"""Shared fixtures: a complete, schema-valid Decision Intelligence Assessment."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import copy
 
 import pytest
 
-from pitch_analyzer.models import AnalysisResult
+from pitch_analyzer.models import CATEGORY_KEYS, AnalysisResult
 
 
 @pytest.fixture(autouse=True)
@@ -48,157 +48,256 @@ def block_real_email(monkeypatch):
     monkeypatch.setattr(notify, "post_to_resend", _forbidden)
 
 
+#: Scores per category, in `CATEGORY_KEYS` order. Weighted total is 4.59.
+SCORES = [7, 5, 3, 3, 3, 4, 8, 2, 4, 5]
+
+
 def _section(score: int, name: str) -> dict:
     return {
         "score": score,
-        "observations": f"{name} is supported by slides 3-5 with named customers.",
-        "missing": f"No third-party validation of the {name.lower()} claims.",
-        "questions": [f"What independent evidence supports {name.lower()}?"],
+        "subsections": [
+            {
+                "heading": f"Is the {name.lower()} claim supported?",
+                "paragraphs": [
+                    f"The material addresses {name.lower()} directly, and the "
+                    "reasoning holds for the part that is evidenced."
+                ],
+                "bullets": [
+                    {"text": "A supporting point drawn from slide 4.", "adverse": False},
+                    {
+                        "text": "The load-bearing figure is unsourced.",
+                        "adverse": True,
+                    },
+                ],
+            },
+            {
+                "heading": "Assumptions requiring validation",
+                "paragraphs": [],
+                "bullets": [
+                    {"text": "The stated rate is asserted, not shown.", "adverse": True}
+                ],
+            },
+        ],
+        "callouts": [],
+        "diligence_questions": [
+            f"What independent evidence supports the {name.lower()} claim?"
+        ],
     }
 
 
 ANALYSIS_PAYLOAD: dict = {
+    "company_name": "Acme Robotics",
+    "one_line_descriptor": "Warehouse picking automation for mid-size facilities",
+    "metadata": {
+        "source_document": "Acme Executive Summary (1 page)",
+        "analysis_date": "31 August 2026",
+        "company_status": "Clinical stage",
+        "milestone_label": "First install",
+        "milestone_value": "Completed 2025",
+        "regulatory_plan": "Not applicable",
+        "commercialization": "Targeted 2028",
+        "funding_ask": "Not disclosed",
+        "valuation_terms": "Not disclosed",
+        "financials": "Not disclosed",
+        "cap_table_runway": "Not disclosed",
+    },
+    "recommendation": "Investigate Further",
+    "confidence_pct": 62,
+    "verdict_paragraph": (
+        "This is a screening decision, not an investment decision: no raise "
+        "size, valuation or use of funds is disclosed, so there is nothing to "
+        "accept or decline."
+    ),
+    "scoring_fairness_note": (
+        "A note on scoring this document fairly. This is a one-page summary, "
+        "not a deck; information the format cannot carry is noted but not "
+        "scored against the company."
+    ),
     "executive_summary": {
-        "recommendation": "Investigate Further",
-        "confidence_pct": 62,
-        "investment_thesis": (
-            "Acme Robotics sells a warehouse picking arm at roughly half the "
-            "installed cost of incumbent systems, and has converted two paid "
-            "pilots into multi-year contracts. The thesis rests on whether that "
-            "cost advantage survives volume manufacturing."
+        "recommendation_qualifier": "request full materials",
+        "confidence_note": (
+            "raised by an unusually well-matched founder, capped by the "
+            "absence of any commercial terms"
         ),
+        "key_investment_thesis": [
+            "Warehouse picking is a genuinely good problem to attack.",
+            "The strongest element by some distance is the founder.",
+            "The thesis breaks if the cost curve does not hold.",
+        ],
         "top_strengths": [
-            "Two paid pilots converted to 3-year contracts (Slide 7).",
-            "Founding team shipped a comparable arm at a public robotics firm.",
-            "Unit economics improve materially at 500 units/year (Slide 11).",
+            "Founder-market fit is close to ideal. A 25-year operator who "
+            "previously ran the identical commercial motion.",
+            "Two paid pilots converted to three-year contracts (Slide 7).",
+            "The buyer and the beneficiary are the same party.",
         ],
         "top_concerns": [
+            "The regulatory strategy delivers a clearance for the wrong "
+            "indication, and the summary does not acknowledge the gap.",
+            "The market sizing contradicts itself within two sentences.",
             "No signed supply agreement for the actuator (Slide 12).",
-            "TAM is top-down and unsourced (Slide 5).",
-            "18 months of runway against a 30-month milestone plan.",
         ],
     },
-    "scores": {
-        "problem_validation": 8,
-        "solution_strength": 7,
-        "market_opportunity": 6,
-        "competitive_position": 5,
-        "business_model": 7,
-        "traction": 6,
-        "team": 8,
-        "financial_quality": 4,
-        "risk_profile": 5,
-        "investment_attractiveness": 6,
-        "weighted_overall": 6.2,
-        "decision_quality": 5.8,
+    "assessment": {
+        key: _section(score, title)
+        for key, score, title in zip(
+            CATEGORY_KEYS,
+            SCORES,
+            [
+                "Problem validation",
+                "Solution effectiveness",
+                "Market opportunity",
+                "Competitive intelligence",
+                "Business model",
+                "Traction evidence",
+                "Team assessment",
+                "Financial intelligence",
+                "Risk intelligence",
+                "Assumption mapping",
+            ],
+        )
     },
-    "sections": {
-        "problem_validation": _section(8, "Problem validation"),
-        "solution_effectiveness": _section(7, "Solution effectiveness"),
-        "market_opportunity": _section(6, "Market opportunity"),
-        "competitive_intelligence": _section(5, "Competitive intelligence"),
-        "business_model": _section(7, "Business model"),
-        "traction_evidence": _section(6, "Traction evidence"),
-        "team_assessment": _section(8, "Team assessment"),
-        "financial_intelligence": _section(4, "Financial intelligence"),
-    },
-    "risks": [
+    "market_sizing": [
+        {"layer": "US TAM", "as_stated": "$9B", "assessment": "Assumes universal adoption"},
+        {"layer": "SAM", "as_stated": "Not stated", "assessment": "—"},
+    ],
+    "competitors": [
         {
-            "category": "Financial",
-            "description": "Runway ends 12 months before the stated Series A milestone.",
+            "competitor": "Incumbent A",
+            "type": "Device — shipping since 2019",
+            "why_it_competes": "Addresses the same workflow at a higher price point.",
+        }
+    ],
+    "evidence_quality": [
+        {
+            "evidence": "Clinical prototype",
+            "demonstrates": "A physical device exists",
+            "does_not_demonstrate": "Manufacturability or design freeze",
+        }
+    ],
+    "sensitivity": [
+        {
+            "variable": "Effect size on length of stay",
+            "stated": "Not stated",
+            "determined_by": "The pivotal study",
+            "effect_if_adverse": "Below one day, the price cannot be justified.",
+        }
+    ],
+    "risk_register": [
+        {
+            "category": "REGULATORY",
+            "risk": "Cleared indication differs from the marketed use.",
             "probability": "High",
             "impact": "High",
-            "mitigation": "Raise a bridge or cut the hardware roadmap to one SKU.",
+            "mitigation": "Require the intended indications-for-use statement.",
         },
         {
-            "category": "Execution",
-            "description": "Contract manufacturer has not been selected (Slide 12).",
-            "probability": "Medium",
+            "category": "FINANCIAL",
+            "risk": "No ask, no financials, no runway disclosed.",
+            "probability": "High",
             "impact": "High",
-            "mitigation": "Sign an NRE agreement before the round closes.",
+            "mitigation": "Request the full financial package before further work.",
         },
         {
-            "category": "Competitive",
-            "description": "A well-funded incumbent is shipping a similar arm in Europe.",
+            "category": "COMPETITIVE",
+            "risk": "A well-funded incumbent holds the adjacent franchise.",
             "probability": "Medium",
-            "impact": "Medium",
-            "mitigation": "Lock in exclusivity with the two pilot customers.",
-        },
-        {
-            "category": "Market",
-            "description": "TAM figure is unsourced and likely overstated.",
-            "probability": "Medium",
-            "impact": "Medium",
-            "mitigation": "Rebuild the model bottom-up from facility counts.",
+            "impact": "Medium-High",
+            "mitigation": "Freedom-to-operate opinion against the incumbent estate.",
         },
     ],
     "assumptions": [
         {
-            "assumption": "Bill of materials falls 30% at 500 units/year.",
-            "evidence": "Vendor quote referenced on Slide 11; quote not attached.",
-            "confidence": "Low",
-            "validation": "Request the quote and a second supplier bid.",
+            "assumption": "The device clears on a predicate and the indication follows.",
+            "evidence": "Stated as the plan; no pre-submission minutes.",
+            "confidence": "LOW",
+            "validation": "Pre-submission minutes; named predicate.",
         },
         {
-            "assumption": "Both pilot customers renew at contract end.",
-            "evidence": "Signed 3-year contracts shown on Slide 7.",
-            "confidence": "Medium",
-            "validation": "Reference calls with both operations leads.",
+            "assumption": "Capital required to reach commercialization is available.",
+            "evidence": "Nothing disclosed — no ask, no financials.",
+            "confidence": "UNKNOWN",
+            "validation": "Raise size, use of funds, current cash and burn.",
         },
     ],
     "scenarios": {
         "best": {
             "probability_pct": 20,
-            "drivers": [
-                "Actuator supply locked at quoted price.",
-                "Pilots expand to 40 units across both accounts.",
-            ],
+            "narrative": "Supply is locked and the pilots expand on schedule.",
+            "drivers": ["Actuator supply locked at the quoted price."],
+            "gross_multiple": "8–15x (mid 11x)",
+            "weighted_multiple": 2.20,
         },
         "base": {
-            "probability_pct": 55,
-            "drivers": [
-                "Manufacturing slips two quarters.",
-                "Revenue reaches $4M by 2028 on flat gross margin.",
-            ],
+            "probability_pct": 35,
+            "narrative": "Manufacturing slips two quarters.",
+            "drivers": ["Revenue reaches $4M by 2028 on flat gross margin."],
+            "gross_multiple": "1–3x (mid 1.8x)",
+            "weighted_multiple": 0.63,
         },
         "worst": {
-            "probability_pct": 25,
-            "drivers": [
-                "Bridge round required at a flat valuation.",
-                "Incumbent undercuts pricing in the core segment.",
-            ],
+            "probability_pct": 45,
+            "narrative": "A bridge is required at a flat valuation.",
+            "drivers": ["The incumbent undercuts pricing in the core segment."],
+            "gross_multiple": "0–0.4x",
+            "weighted_multiple": 0.09,
         },
     },
-    "bull_case": (
-        "If the actuator cost curve holds, Acme reaches positive unit economics "
-        "at 500 units and becomes the default retrofit option for mid-size "
-        "warehouses, a segment incumbents price out of reach."
-    ),
-    "bear_case": (
-        "Hardware cost reductions do not materialise, the company burns the "
-        "round on a single custom deployment, and a bridge is required within "
-        "18 months at a flat valuation."
-    ),
-    "missing_information": [
-        "Signed supply agreement for the actuator.",
-        "Bottom-up TAM methodology.",
-        "Cap table and prior note terms.",
+    "basis_of_analysis": {
+        "title": "BASIS OF THIS ANALYSIS",
+        "body": "No ask or valuation is disclosed, so multiples are computed "
+        "against an assumed entry.",
+        "critical": False,
+    },
+    "expected_outcome_callout": {
+        "title": "EXPECTED RISK-ADJUSTED OUTCOME",
+        "body": "Approximately 2.9x gross expected multiple.",
+        "critical": False,
+    },
+    "committee_view": {
+        "bull_case": "If the cost curve holds, Acme becomes the default retrofit.",
+        "bear_case": "Cost reductions do not materialise and a bridge is required.",
+        "would_enable_a_decision": ["The ask, terms and use of funds."],
+        "would_change_the_assessment": ["The full pilot dataset."],
+    },
+    "scorecard": [
+        {"category": key, "score": score, "driver": f"Driver for {key.replace('_', ' ')}."}
+        for key, score in zip(CATEGORY_KEYS, SCORES)
     ],
-    "top_diligence_questions": [
-        "What are the exact terms of the two pilot-to-contract conversions?",
-        "Which contract manufacturer is selected, and at what NRE cost?",
-        "How was the $12B TAM on Slide 5 derived?",
-        "What is the burn rate and the actual runway from close?",
-        "Who owns the actuator IP, and is any of it licensed?",
+    "composite": {
+        "decision_quality": 4.5,
+        "weighted_interpretation": "Below the threshold at which capital should be committed.",
+        "confidence_interpretation": "The lowest of the cycle, and appropriately so.",
+        "decision_quality_interpretation": "The material does not support a decision.",
+    },
+    "comparative_context": [],
+    "final": {
+        "how_to_approach": "Request the full package before any further work.",
+        "top_five_diligence_questions": [
+            "What are the exact terms of the pilot conversions?",
+            "Which contract manufacturer is selected, and at what cost?",
+            "How was the market size derived?",
+            "What is the burn rate and the runway from close?",
+            "Who owns the core IP, and is any of it licensed?",
+        ],
+        "milestones": [
+            {
+                "milestone": "A complete investment package.",
+                "why_it_matters": "No decision is possible without it.",
+            }
+        ],
+        "expected_risk_adjusted_outcome": "Approximately 2.9x gross expected multiple.",
+    },
+    "memo": [
+        "Acme Robotics — warehouse picking automation",
+        "INVESTIGATE FURTHER — request the full package",
+        "62% (lowest of the cycle)",
+        "4.6 / 10",
+        "Not disclosed",
+        "Founder-market fit",
+        "One page of information and no ask",
+        "Request the full package",
+        "Screen forward",
     ],
-    "key_milestones_before_investment": [
-        "Signed NRE agreement with a contract manufacturer.",
-        "Reference calls completed with both pilot customers.",
-    ],
-    "expected_risk_adjusted_outcome": (
-        "A probability-weighted 2.1x over five years, dominated by the base "
-        "case; the outcome is highly sensitive to the actuator supply question."
-    ),
 }
 
 

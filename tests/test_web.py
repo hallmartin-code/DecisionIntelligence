@@ -97,7 +97,7 @@ def test_index_renders_for_an_authenticated_user(client):
     response = client.get("/", auth=AUTH)
 
     assert response.status_code == 200
-    assert "Generate one-pager PDF" in response.text
+    assert "Generate the report" in response.text
     assert "Deck Analyzer" in response.text
     assert "Ten Capital" in response.text
 
@@ -196,17 +196,6 @@ def test_upload_rejects_an_oversized_file(client, monkeypatch):
     assert response.status_code == 413
 
 
-def test_upload_rejects_a_bad_orientation(client, deck_bytes):
-    response = client.post(
-        "/analyze",
-        auth=AUTH,
-        files={"deck": ("deck.pdf", deck_bytes, "application/pdf")},
-        data={"orientation": "sideways"},
-    )
-
-    assert response.status_code == 400
-
-
 def test_upload_requires_auth(client, deck_bytes):
     response = client.post(
         "/analyze", files={"deck": ("deck.pdf", deck_bytes, "application/pdf")}
@@ -226,7 +215,7 @@ def test_full_job_flow_produces_a_downloadable_report(client, deck_bytes):
         auth=AUTH,
         headers={"Accept": "application/json"},
         files={"deck": ("Testco Deck.pdf", deck_bytes, "application/pdf")},
-        data={"orientation": "landscape", "include_images": "off"},
+        data={"include_images": "off"},
     )
     assert submitted.status_code == 202
     job_id = submitted.json()["job_id"]
@@ -238,12 +227,12 @@ def test_full_job_flow_produces_a_downloadable_report(client, deck_bytes):
     assert final["confidence_pct"] == 62
     assert final["slide_count"] == 3
 
-    report = client.get(f"/jobs/{job_id}/report.pdf", auth=AUTH)
+    report = client.get(f"/jobs/{job_id}/report.docx", auth=AUTH)
     assert report.status_code == 200
-    assert report.headers["content-type"] == "application/pdf"
+    assert "wordprocessingml" in report.headers["content-type"]
     # Starlette percent-encodes the filename per RFC 5987.
-    assert "Testco%20Deck_analysis.pdf" in report.headers["content-disposition"]
-    assert report.content.startswith(b"%PDF")
+    assert "Testco%20Deck_analysis.docx" in report.headers["content-disposition"]
+    assert report.content[:2] == b"PK"
     assert len(report.content) > 5 * 1024
 
 
@@ -277,7 +266,7 @@ def test_job_endpoints_require_auth(client, deck_bytes):
 
     assert client.get(f"/jobs/{job_id}").status_code == 401
     assert client.get(f"/jobs/{job_id}/status").status_code == 401
-    assert client.get(f"/jobs/{job_id}/report.pdf").status_code == 401
+    assert client.get(f"/jobs/{job_id}/report.docx").status_code == 401
 
 
 def test_unknown_job_is_a_404(client):
@@ -293,7 +282,7 @@ def test_unchecked_images_box_produces_a_text_only_analysis(client, deck_bytes):
         auth=AUTH,
         headers={"Accept": "application/json"},
         files={"deck": ("deck.pdf", deck_bytes, "application/pdf")},
-        data={"orientation": "landscape"},  # no include_images, as a browser sends
+        data={},  # no include_images, as a browser sends
     )
     job = web_module.store.get(submitted.json()["job_id"])
 
@@ -367,7 +356,7 @@ def test_report_is_409_until_the_job_finishes(client, tmp_path):
     job.state = JobState.ANALYZING
     job.report_path = None
 
-    response = client.get(f"/jobs/{job.id}/report.pdf", auth=AUTH)
+    response = client.get(f"/jobs/{job.id}/report.docx", auth=AUTH)
 
     assert response.status_code == 409
 
@@ -428,7 +417,6 @@ def test_sweep_leaves_a_running_job_alone(tmp_path):
         running = Job(
             id="running",
             filename="deck.pdf",
-            orientation="landscape",
             model="test",
             include_images=False,
             workdir=workdir,

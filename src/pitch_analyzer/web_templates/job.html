@@ -43,8 +43,8 @@
         <div class="score-key">Slides read</div>
       </div>
     </div>
-    <a id="download" href="/jobs/{{ job.id }}/report.pdf" download>
-      <button class="cta" type="button">Download the one-pager</button>
+    <a id="download" href="/jobs/{{ job.id }}/report.docx" download>
+      <button class="cta" type="button">Download the report</button>
     </a>
     <p class="meta" id="email-status"></p>
   </div>
@@ -103,7 +103,7 @@
     el("fill").classList.add("is-done");
     el("progress-block").hidden = true;
     el("lede").textContent =
-      "The one-pager is ready. It is removed automatically along with the uploaded deck, so download it now.";
+      "The report is ready. It is removed automatically along with the uploaded deck, so download it now.";
 
     const verdict = el("verdict");
     verdict.textContent = (data.recommendation || "").toUpperCase();

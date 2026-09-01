@@ -38,9 +38,10 @@ def clean_email_env(monkeypatch):
 
 @pytest.fixture
 def report_pdf(tmp_path, analysis_result):
-    from pitch_analyzer.render import render_one_pager
+    """The rendered report; named for the attachment it becomes."""
+    from pitch_analyzer.render import render_report
 
-    return render_one_pager(analysis_result, tmp_path / "report.pdf")
+    return render_report(analysis_result, tmp_path / "report.docx")
 
 
 class Recorder:
@@ -114,11 +115,11 @@ def test_message_carries_the_verdict_and_the_pdf(analysis_result, report_pdf):
     assert message["to"] == ["Info@tencapital.group"]
     assert "Investigate Further" in message["subject"]
     assert "Acme Robotics" in message["subject"]
-    assert "6.2/10" in message["subject"]
+    assert "4.6/10" in message["subject"]
 
     attachment = message["attachments"][0]
-    assert attachment["filename"].endswith(".pdf")
-    assert base64.standard_b64decode(attachment["content"]).startswith(b"%PDF")
+    assert attachment["filename"].endswith(".docx")
+    assert base64.standard_b64decode(attachment["content"])[:2] == b"PK"
 
 
 def test_both_html_and_plain_text_bodies_are_present(analysis_result, report_pdf):
@@ -137,7 +138,9 @@ def test_both_html_and_plain_text_bodies_are_present(analysis_result, report_pdf
 def test_html_body_escapes_markup_from_the_analysis(analysis_payload, report_pdf):
     from pitch_analyzer.models import AnalysisResult
 
-    analysis_payload["executive_summary"]["investment_thesis"] = "A & B <script>x</script>"
+    analysis_payload["executive_summary"]["key_investment_thesis"] = [
+        "A & B <script>x</script>"
+    ]
     analysis = AnalysisResult.model_validate(analysis_payload)
 
     message = build_message(CONFIG, analysis, report_pdf, "Acme", "a.pdf", "m", 1)
@@ -150,7 +153,7 @@ def test_missing_report_still_sends_without_an_attachment(
     tmp_path, analysis_result
 ):
     message = build_message(
-        CONFIG, analysis_result, tmp_path / "gone.pdf", "Acme", "a.pdf", "m", 1
+        CONFIG, analysis_result, tmp_path / "gone.docx", "Acme", "a.pdf", "m", 1
     )
 
     assert "attachments" not in message

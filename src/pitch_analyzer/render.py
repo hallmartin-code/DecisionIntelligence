@@ -1,91 +1,248 @@
-"""ReportLab one-pager builder.
+"""Word (.docx) builder for the Decision Intelligence Assessment.
 
-The page is laid out top-down as five stacked bands (header, three-column row,
-risks, diligence questions, footer). Each band's natural height is measured
-before anything is drawn; if the stack does not fit, the whole page is re-laid
-at a smaller font until it does, or `LayoutOverflowError` is raised.
+Implements `templates/di_report_structure.md`. Formatting is applied directly to
+runs and cells rather than through named styles, so the output does not depend
+on which template Word happens to open it with.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Optional, Sequence
-from xml.sax.saxutils import escape
+from typing import Iterable, Optional, Sequence
 
-from reportlab.lib.colors import Color, HexColor
-from reportlab.lib.pagesizes import landscape, letter, portrait
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.pdfgen.canvas import Canvas
-from reportlab.platypus import Flowable, Paragraph, Table, TableStyle
+from docx import Document
+from docx.enum.section import WD_ORIENT
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Inches, Pt, RGBColor
 
-from .models import AnalysisResult
+from .models import (
+    CATEGORIES,
+    CATEGORY_TITLES,
+    AnalysisResult,
+    Bullet,
+    Callout,
+    SubSection,
+)
 
 # --------------------------------------------------------------------------- #
 # Design tokens
 # --------------------------------------------------------------------------- #
 
-INK = HexColor("#111827")
-BODY = HexColor("#1f2937")
-MUTED = HexColor("#6b7280")
-RULE = HexColor("#d1d5db")
-TRACK = HexColor("#e5e7eb")
-PANEL = HexColor("#f3f4f6")
-WHITE = HexColor("#ffffff")
+NAVY = RGBColor(0x1F, 0x38, 0x64)
+BLUE = RGBColor(0x2E, 0x74, 0xB5)
+CRIMSON = RGBColor(0xA6, 0x19, 0x2E)
+GREY = RGBColor(0x59, 0x59, 0x59)
+WHITE = RGBColor(0xFF, 0xFF, 0xFF)
 
-GREEN = HexColor("#16a34a")
-AMBER = HexColor("#d97706")
-RED = HexColor("#dc2626")
+PANEL_FILL = "F5F7FA"
+HEADER_FILL = "1F3864"
 
-BADGE_COLORS = {
-    "Invest": GREEN,
-    "Investigate Further": AMBER,
-    "Pass": RED,
-}
-LEVEL_COLORS = {"Low": GREEN, "Medium": AMBER, "High": RED}
+FONT = "Calibri"
 
-FONT = "Helvetica"
-FONT_BOLD = "Helvetica-Bold"
+SIZE_BRAND = Pt(10)
+SIZE_EYEBROW = Pt(8)
+SIZE_TITLE = Pt(25)
+SIZE_TAGLINE = Pt(11)
+SIZE_H1 = Pt(15)
+SIZE_H2 = Pt(12)
+SIZE_H3 = Pt(10.5)
+SIZE_BODY = Pt(10)
+SIZE_VERDICT = Pt(13)
+SIZE_TABLE = Pt(9)
 
-MARGIN = 22.0
-GUTTER = 10.0
-BAND_GAP = 9.0
-# Leftover vertical space is shared between the bands so a short analysis reads
-# as a composed page rather than a top-heavy one. Bounded, so a very sparse
-# report does not end up as five islands of text.
-MAX_EXTRA_BAND_GAP = 20.0
+PAGE_WIDTH = Inches(8.5)
+PAGE_HEIGHT = Inches(11)
+MARGIN_X = Inches(0.88)
+MARGIN_Y = Inches(0.83)
 
-# Font sizes the fit guard may use, largest first (0.5pt steps, 5.5pt floor).
-FONT_SIZES: tuple[float, ...] = (8.0, 7.5, 7.0, 6.5, 6.0, 5.5)
-START_FONT_SIZE = FONT_SIZES[0]
-MIN_FONT_SIZE = FONT_SIZES[-1]
-
-MAX_RISK_ROWS = 4
-MAX_QUESTIONS = 5
-
-# Per-field character budgets at a clip scale of 1.0. A one-pager cannot carry
-# an unbounded analysis, so long fields are clipped — but the fit guard spends
-# type size before it spends text (see _LAYOUT_STEPS).
-CLIP_THESIS = 520
-CLIP_BULLET = 210
-CLIP_RISK = 190
-CLIP_QUESTION = 240
-CLIP_CASE = 420
-CLIP_DRIVER = 120
-CLIP_OUTCOME = 260
-
-# The fit guard walks FONT_SIZES in order. At each size it finds the largest
-# text budget that still fits, and stops at the first size that can carry an
-# acceptable one — so type size is only spent once text has been.
-MIN_CLIP_SCALE = 0.60
-MAX_CLIP_SCALE = 1.60
-ACCEPTABLE_CLIP_SCALE = 0.90
-CLIP_SEARCH_ITERATIONS = 6
+# Length arithmetic returns a bare EMU int, so keep the usable width in inches.
+CONTENT_WIDTH_IN = 8.5 - 2 * 0.88
 
 
-class LayoutOverflowError(RuntimeError):
-    """Raised when the report cannot be fitted onto one page at 5.5pt."""
+class RenderError(RuntimeError):
+    """Raised when the document cannot be produced."""
+
+
+# --------------------------------------------------------------------------- #
+# Low-level helpers
+# --------------------------------------------------------------------------- #
+
+
+def _run(paragraph, text: str, *, size=SIZE_BODY, bold=False, italic=False,
+         color: Optional[RGBColor] = None, caps=False):
+    run = paragraph.add_run(text.upper() if caps else text)
+    run.font.name = FONT
+    run.font.size = size
+    run.font.bold = bold
+    run.font.italic = italic
+    if color is not None:
+        run.font.color.rgb = color
+    return run
+
+
+def _para(container, text: str = "", *, size=SIZE_BODY, bold=False, italic=False,
+          color: Optional[RGBColor] = None, space_before=0, space_after=4,
+          align=None, caps=False):
+    paragraph = container.add_paragraph()
+    fmt = paragraph.paragraph_format
+    fmt.space_before = Pt(space_before)
+    fmt.space_after = Pt(space_after)
+    if align is not None:
+        fmt.alignment = align
+    if text:
+        _run(paragraph, text, size=size, bold=bold, italic=italic, color=color, caps=caps)
+    return paragraph
+
+
+def _shade(cell, fill: str) -> None:
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear")
+    shd.set(qn("w:color"), "auto")
+    shd.set(qn("w:fill"), fill)
+    cell._tc.get_or_add_tcPr().append(shd)
+
+
+def _cell_text(cell, text: str, *, size=SIZE_TABLE, bold=False,
+               color: Optional[RGBColor] = None, align=None) -> None:
+    cell.text = ""
+    paragraph = cell.paragraphs[0]
+    paragraph.paragraph_format.space_before = Pt(1)
+    paragraph.paragraph_format.space_after = Pt(1)
+    if align is not None:
+        paragraph.paragraph_format.alignment = align
+    _run(paragraph, text or "", size=size, bold=bold, color=color)
+
+
+def _widths(table, fractions: Sequence[float]) -> None:
+    """Set column widths as fractions of the content width."""
+    table.autofit = False
+    for row in table.rows:
+        for cell, fraction in zip(row.cells, fractions):
+            cell.width = Inches(CONTENT_WIDTH_IN * fraction)
+
+
+def _grid(document, headers: Sequence[str], rows: Iterable[Sequence[str]],
+          fractions: Sequence[float], *, bold_last_row=False):
+    """A navy-headed grid table."""
+    rows = [list(row) for row in rows]
+    table = document.add_table(rows=1 + len(rows), cols=len(headers))
+    try:
+        table.style = "Table Grid"
+    except KeyError:  # pragma: no cover - style missing from the base template
+        pass
+    table.alignment = WD_TABLE_ALIGNMENT.LEFT
+
+    for index, header in enumerate(headers):
+        cell = table.rows[0].cells[index]
+        _shade(cell, HEADER_FILL)
+        _cell_text(cell, header, bold=True, color=WHITE)
+
+    for row_index, values in enumerate(rows, start=1):
+        last = bold_last_row and row_index == len(rows)
+        for col_index, value in enumerate(values):
+            _cell_text(table.rows[row_index].cells[col_index], str(value), bold=last)
+
+    _widths(table, fractions)
+    _para(document, space_after=6)
+    return table
+
+
+def _callout(document, callout: Callout) -> None:
+    """A single-cell shaded panel with an ALL-CAPS title."""
+    table = document.add_table(rows=1, cols=1)
+    cell = table.rows[0].cells[0]
+    _shade(cell, PANEL_FILL)
+    cell.text = ""
+
+    title_p = cell.paragraphs[0]
+    title_p.paragraph_format.space_after = Pt(2)
+    _run(title_p, callout.title, size=SIZE_BODY, bold=True,
+         color=CRIMSON if callout.critical else NAVY)
+
+    body_p = cell.add_paragraph()
+    body_p.paragraph_format.space_after = Pt(2)
+    _run(body_p, callout.body, size=SIZE_BODY)
+
+    _widths(table, [1.0])
+    _para(document, space_after=6)
+
+
+def _bullets(document, items: Iterable[Bullet | str], *, bold=True, numbered=False) -> None:
+    for index, item in enumerate(items, start=1):
+        bullet = item if isinstance(item, Bullet) else Bullet(text=str(item))
+        paragraph = document.add_paragraph()
+        fmt = paragraph.paragraph_format
+        fmt.left_indent = Inches(0.25)
+        fmt.first_line_indent = Inches(-0.15)
+        fmt.space_after = Pt(3)
+        marker = f"{index}. " if numbered else "•  "
+        _run(paragraph, marker + bullet.text, size=SIZE_BODY, bold=bold,
+             color=CRIMSON if bullet.adverse else None)
+
+
+def _h1(document, text: str) -> None:
+    _para(document, text, size=SIZE_H1, bold=True, color=NAVY,
+          space_before=14, space_after=6)
+
+
+def _h2(document, text: str) -> None:
+    _para(document, text, size=SIZE_H2, bold=True, color=BLUE,
+          space_before=10, space_after=4)
+
+
+def _h3(document, text: str) -> None:
+    _para(document, text, size=SIZE_H3, bold=True, color=NAVY,
+          space_before=7, space_after=3)
+
+
+def _subsections(document, subsections: Iterable[SubSection]) -> None:
+    for sub in subsections:
+        _h3(document, sub.heading)
+        for text in sub.paragraphs:
+            _para(document, text)
+        if sub.bullets:
+            _bullets(document, sub.bullets)
+
+
+def _footer(section, company_name: str) -> None:
+    paragraph = section.footer.paragraphs[0]
+    paragraph.paragraph_format.tab_stops.add_tab_stop(
+        Inches(CONTENT_WIDTH_IN), WD_TAB_ALIGNMENT.RIGHT
+    )
+    _run(
+        paragraph,
+        f"TEN Capital Group  ·  Decision Intelligence Assessment  ·  "
+        f"{company_name}  ·  Confidential\t",
+        size=Pt(8),
+        color=GREY,
+    )
+    _run(paragraph, "Page ", size=Pt(8), color=GREY)
+    _page_field(paragraph, "PAGE")
+    _run(paragraph, " of ", size=Pt(8), color=GREY)
+    _page_field(paragraph, "NUMPAGES")
+
+
+def _page_field(paragraph, instruction: str) -> None:
+    run = paragraph.add_run()
+    run.font.name = FONT
+    run.font.size = Pt(8)
+    run.font.color.rgb = GREY
+
+    begin = OxmlElement("w:fldChar")
+    begin.set(qn("w:fldCharType"), "begin")
+    instr = OxmlElement("w:instrText")
+    instr.set(qn("xml:space"), "preserve")
+    instr.text = f" {instruction} "
+    end = OxmlElement("w:fldChar")
+    end.set(qn("w:fldCharType"), "end")
+
+    run._r.append(begin)
+    run._r.append(instr)
+    run._r.append(end)
 
 
 # --------------------------------------------------------------------------- #
@@ -93,801 +250,314 @@ class LayoutOverflowError(RuntimeError):
 # --------------------------------------------------------------------------- #
 
 
-def render_one_pager(
+def render_report(
     analysis: AnalysisResult,
     output_path: str | Path,
-    company_name: str = "Pitch Deck",
-    orientation: str = "landscape",
-    logo_path: Optional[str | Path] = None,
     generated_on: Optional[date] = None,
 ) -> Path:
-    """Render `analysis` to a single-page PDF and return the output path."""
-    if orientation not in ("landscape", "portrait"):
-        raise ValueError("orientation must be 'landscape' or 'portrait'")
-
-    page_size = (landscape if orientation == "landscape" else portrait)(letter)
-    stamp = generated_on or date.today()
-
-    layout = _fit_layout(analysis, page_size, company_name, logo_path, stamp)
-
+    """Render `analysis` to a .docx report and return the path."""
     destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
+    stamp = generated_on or date.today()
 
-    canvas = Canvas(str(destination), pagesize=page_size)
-    canvas.setTitle(f"{company_name} — Decision Intelligence Analysis")
-    layout.draw(canvas)
-    canvas.showPage()
-    canvas.save()
+    document = Document()
+    _configure(document, analysis.company_name)
+
+    _masthead(document, analysis, stamp)
+    _part_executive_summary(document, analysis)
+    _part_assessment(document, analysis)
+    _part_scenarios(document, analysis)
+    _part_committee_view(document, analysis)
+    _part_scorecard(document, analysis)
+    _part_final(document, analysis)
+    _part_memo(document, analysis)
+
+    document.save(str(destination))
     return destination
 
 
-# --------------------------------------------------------------------------- #
-# Layout primitives
-# --------------------------------------------------------------------------- #
+def _configure(document: Document, company_name: str) -> None:
+    normal = document.styles["Normal"]
+    normal.font.name = FONT
+    normal.font.size = SIZE_BODY
 
-
-class Stack:
-    """A fixed-width column of flowables measured and drawn top-down."""
-
-    def __init__(self, width: float) -> None:
-        self.width = width
-        self._items: list[tuple[Flowable, float]] = []
-
-    def add(self, flowable: Flowable, gap: float = 0.0) -> "Stack":
-        self._items.append((flowable, gap))
-        return self
-
-    def height(self) -> float:
-        total = 0.0
-        for flowable, gap in self._items:
-            _, height = flowable.wrap(self.width, 1e6)
-            total += height + gap
-        return total
-
-    def draw(self, canvas: Canvas, x: float, top: float) -> float:
-        cursor = top
-        for flowable, gap in self._items:
-            _, height = flowable.wrap(self.width, 1e6)
-            flowable.drawOn(canvas, x, cursor - height)
-            cursor -= height + gap
-        return cursor
-
-
-class ScoreBars(Flowable):
-    """The 10-category scorecard: label, gradient bar, numeric value."""
-
-    def __init__(self, rows: Sequence[tuple[str, float]], width: float, font_size: float):
-        super().__init__()
-        self.rows = list(rows)
-        self.width = width
-        self.font_size = font_size
-        self.row_height = font_size + 4.4
-        self.height = self.row_height * len(self.rows)
-
-    def wrap(self, available_width: float, available_height: float):
-        return self.width, self.height
-
-    def draw(self) -> None:
-        canvas = self.canv
-        label_width = self.width * 0.50
-        bar_x = label_width + 3.0
-        value_width = self.font_size * 1.9
-        bar_width = max(10.0, self.width - bar_x - value_width)
-        bar_height = self.font_size * 0.74
-
-        for index, (label, value) in enumerate(self.rows):
-            baseline = self.height - (index + 1) * self.row_height + 2.2
-            canvas.setFont(FONT, self.font_size)
-            canvas.setFillColor(BODY)
-            canvas.drawString(0, baseline + 1.0, label)
-
-            canvas.setFillColor(TRACK)
-            canvas.roundRect(
-                bar_x, baseline, bar_width, bar_height, bar_height / 2, stroke=0, fill=1
-            )
-
-            fraction = max(0.0, min(1.0, float(value) / 10.0))
-            if fraction > 0:
-                canvas.setFillColor(score_color(fraction))
-                canvas.roundRect(
-                    bar_x,
-                    baseline,
-                    max(bar_width * fraction, bar_height),
-                    bar_height,
-                    bar_height / 2,
-                    stroke=0,
-                    fill=1,
-                )
-
-            canvas.setFont(FONT_BOLD, self.font_size)
-            canvas.setFillColor(INK)
-            canvas.drawRightString(self.width, baseline + 1.0, _format_score(value))
-
-
-class ScenarioBar(Flowable):
-    """One scenario row: name, probability bar, percentage."""
-
-    def __init__(
-        self, name: str, percent: float, width: float, font_size: float, color: Color
-    ):
-        super().__init__()
-        self.name = name
-        self.percent = max(0.0, min(100.0, float(percent)))
-        self.width = width
-        self.font_size = font_size
-        self.color = color
-        self.height = font_size + 5.0
-
-    def wrap(self, available_width: float, available_height: float):
-        return self.width, self.height
-
-    def draw(self) -> None:
-        canvas = self.canv
-        label_width = self.width * 0.30
-        value_width = self.font_size * 2.4
-        bar_x = label_width + 2.0
-        bar_width = max(10.0, self.width - bar_x - value_width)
-        bar_height = self.font_size * 0.78
-        baseline = 1.5
-
-        canvas.setFont(FONT_BOLD, self.font_size)
-        canvas.setFillColor(INK)
-        canvas.drawString(0, baseline + 1.0, self.name)
-
-        canvas.setFillColor(TRACK)
-        canvas.roundRect(
-            bar_x, baseline, bar_width, bar_height, bar_height / 2, stroke=0, fill=1
-        )
-        fraction = self.percent / 100.0
-        if fraction > 0:
-            canvas.setFillColor(self.color)
-            canvas.roundRect(
-                bar_x,
-                baseline,
-                max(bar_width * fraction, bar_height),
-                bar_height,
-                bar_height / 2,
-                stroke=0,
-                fill=1,
-            )
-
-        canvas.setFont(FONT, self.font_size)
-        canvas.setFillColor(BODY)
-        canvas.drawRightString(self.width, baseline + 1.0, f"{self.percent:.0f}%")
-
-
-class HeaderBand(Flowable):
-    """Company name, date, recommendation badge, and the rule beneath them."""
-
-    def __init__(
-        self,
-        company_name: str,
-        stamp: date,
-        recommendation: str,
-        confidence_pct: int,
-        width: float,
-        font_size: float,
-        logo_path: Optional[str | Path] = None,
-    ):
-        super().__init__()
-        self.company_name = company_name
-        self.stamp = stamp
-        self.recommendation = recommendation
-        self.confidence_pct = confidence_pct
-        self.width = width
-        self.font_size = font_size
-        self.logo_path = logo_path
-        self.title_size = font_size + 6.0
-        self.height = self.title_size + font_size + 12.0
-
-    def wrap(self, available_width: float, available_height: float):
-        return self.width, self.height
-
-    def draw(self) -> None:
-        canvas = self.canv
-        top = self.height
-
-        badge_height = self.title_size + 3.0
-        badge_text = f"{self.recommendation.upper()}  ·  {self.confidence_pct}% CONF."
-        badge_font = self.font_size + 0.5
-        badge_width = canvas.stringWidth(badge_text, FONT_BOLD, badge_font) + 16.0
-        badge_x = self.width - badge_width
-        badge_y = top - badge_height
-
-        canvas.setFillColor(BADGE_COLORS.get(self.recommendation, AMBER))
-        canvas.roundRect(
-            badge_x, badge_y, badge_width, badge_height, 2.5, stroke=0, fill=1
-        )
-        canvas.setFillColor(WHITE)
-        canvas.setFont(FONT_BOLD, badge_font)
-        canvas.drawCentredString(
-            badge_x + badge_width / 2,
-            badge_y + (badge_height - badge_font) / 2 + 1.5,
-            badge_text,
-        )
-
-        text_x = 0.0
-        if self.logo_path:
-            text_x = self._draw_logo(canvas, top, badge_height)
-
-        canvas.setFillColor(INK)
-        canvas.setFont(FONT_BOLD, self.title_size)
-        canvas.drawString(
-            text_x, top - self.title_size + 1.0, _clip(self.company_name, 60)
-        )
-
-        canvas.setFillColor(MUTED)
-        canvas.setFont(FONT, self.font_size)
-        canvas.drawString(
-            text_x,
-            top - self.title_size - self.font_size - 1.5,
-            f"Decision Intelligence Analysis  ·  {self.stamp:%d %B %Y}",
-        )
-
-        canvas.setStrokeColor(RULE)
-        canvas.setLineWidth(0.7)
-        canvas.line(0, 3.0, self.width, 3.0)
-
-    def _draw_logo(self, canvas: Canvas, top: float, badge_height: float) -> float:
-        """Draw the logo at the left edge; return the x offset for the title."""
-        try:
-            from reportlab.lib.utils import ImageReader
-
-            image = ImageReader(str(self.logo_path))
-            width_px, height_px = image.getSize()
-            draw_height = badge_height
-            draw_width = draw_height * (width_px / height_px)
-            canvas.drawImage(
-                image,
-                0,
-                top - draw_height,
-                width=draw_width,
-                height=draw_height,
-                mask="auto",
-            )
-            return draw_width + 8.0
-        except Exception:
-            # A broken logo must not cost the user their report.
-            return 0.0
+    section = document.sections[0]
+    section.orientation = WD_ORIENT.PORTRAIT
+    section.page_width = PAGE_WIDTH
+    section.page_height = PAGE_HEIGHT
+    section.left_margin = section.right_margin = MARGIN_X
+    section.top_margin = section.bottom_margin = MARGIN_Y
+    _footer(section, company_name)
 
 
 # --------------------------------------------------------------------------- #
-# Layout assembly
+# Parts
 # --------------------------------------------------------------------------- #
 
 
-@dataclass
-class _Layout:
-    page_size: tuple[float, float]
-    header: HeaderBand
-    columns: list[tuple[Stack, float]]
-    bands: list[tuple[str, Stack]]
-    band_heights: dict[str, float] = field(default_factory=dict)
-    required: float = 0.0
-    available: float = 0.0
+def _masthead(document, analysis: AnalysisResult, stamp: date) -> None:
+    _para(document, "TEN CAPITAL GROUP", size=SIZE_BRAND, bold=True, color=BLUE,
+          space_after=0)
+    _para(document, "INVESTMENT COMMITTEE  ·  DECISION INTELLIGENCE ASSESSMENT",
+          size=SIZE_EYEBROW, color=GREY, space_after=6)
+    _para(document, analysis.company_name, size=SIZE_TITLE, bold=True, color=NAVY,
+          space_after=2)
+    if analysis.one_line_descriptor:
+        _para(document, analysis.one_line_descriptor, size=SIZE_TAGLINE, color=GREY,
+              space_after=8)
 
-    @property
-    def fits(self) -> bool:
-        return self.required <= self.available + 0.01
-
-    @property
-    def overflow(self) -> float:
-        return max(0.0, self.required - self.available)
-
-    @property
-    def tallest_band(self) -> str:
-        if not self.band_heights:
-            return "layout"
-        return max(self.band_heights.items(), key=lambda item: item[1])[0]
-
-    @property
-    def band_gap(self) -> float:
-        """BAND_GAP plus a bounded share of any unused vertical space."""
-        gaps = max(1, len(self.band_heights) - 1)
-        slack = max(0.0, self.available - self.required)
-        return BAND_GAP + min(MAX_EXTRA_BAND_GAP, slack / gaps)
-
-    def draw(self, canvas: Canvas) -> None:
-        _page_width, page_height = self.page_size
-        gap = self.band_gap
-        cursor = page_height - MARGIN
-
-        self.header.drawOn(canvas, MARGIN, cursor - self.header.height)
-        cursor -= self.header.height + gap
-
-        column_top = cursor
-        lowest = cursor
-        x = MARGIN
-        for stack, width in self.columns:
-            lowest = min(lowest, stack.draw(canvas, x, column_top))
-            x += width + GUTTER
-        cursor = lowest - gap
-
-        for _name, stack in self.bands:
-            cursor = stack.draw(canvas, MARGIN, cursor) - gap
-
-
-def _fit_layout(
-    analysis: AnalysisResult,
-    page_size: tuple[float, float],
-    company_name: str,
-    logo_path: Optional[str | Path],
-    stamp: date,
-) -> _Layout:
-    """Pick the largest type size that can carry an acceptable text budget.
-
-    At each font size the largest fitting clip scale is found by bisection. The
-    first size that reaches `ACCEPTABLE_CLIP_SCALE` wins; if none does, the
-    candidate that preserved the most text is used.
-    """
-
-    def build(font_size: float, clip_scale: float) -> _Layout:
-        return _build_layout(
-            analysis, page_size, font_size, company_name, logo_path, stamp, clip_scale
-        )
-
-    best: tuple[float, _Layout] | None = None
-    tightest: _Layout | None = None
-
-    for font_size in FONT_SIZES:
-        generous = build(font_size, MAX_CLIP_SCALE)
-        if generous.fits:
-            return generous
-
-        tightest = build(font_size, MIN_CLIP_SCALE)
-        if not tightest.fits:
-            continue  # even the tightest budget overflows at this size
-
-        low, high = MIN_CLIP_SCALE, MAX_CLIP_SCALE
-        feasible = (low, tightest)
-        for _ in range(CLIP_SEARCH_ITERATIONS):
-            middle = (low + high) / 2
-            candidate = build(font_size, middle)
-            if candidate.fits:
-                low, feasible = middle, (middle, candidate)
-            else:
-                high = middle
-
-        if best is None or feasible[0] > best[0]:
-            best = feasible
-        if feasible[0] >= ACCEPTABLE_CLIP_SCALE:
-            return feasible[1]
-
-    if best is not None:
-        return best[1]
-
-    overflowing = tightest or build(MIN_FONT_SIZE, MIN_CLIP_SCALE)
-    raise LayoutOverflowError(
-        f"Could not fit the report on one page at {MIN_FONT_SIZE}pt: the "
-        f"'{overflowing.tallest_band}' section overflows by "
-        f"{overflowing.overflow:.0f}pt (needs {overflowing.required:.0f}pt of "
-        f"{overflowing.available:.0f}pt available)."
-    )
-
-
-@dataclass(frozen=True)
-class Limits:
-    """Per-field character budgets for the current fit candidate."""
-
-    thesis: int
-    bullet: int
-    risk: int
-    question: int
-    case: int
-    driver: int
-    outcome: int
-
-    @classmethod
-    def scaled(cls, scale: float) -> "Limits":
-        return cls(
-            thesis=int(CLIP_THESIS * scale),
-            bullet=int(CLIP_BULLET * scale),
-            risk=int(CLIP_RISK * scale),
-            question=int(CLIP_QUESTION * scale),
-            case=int(CLIP_CASE * scale),
-            driver=int(CLIP_DRIVER * scale),
-            outcome=int(CLIP_OUTCOME * scale),
-        )
-
-
-def _build_layout(
-    analysis: AnalysisResult,
-    page_size: tuple[float, float],
-    font_size: float,
-    company_name: str,
-    logo_path: Optional[str | Path],
-    stamp: date,
-    clip_scale: float = 1.0,
-) -> _Layout:
-    page_width, page_height = page_size
-    content_width = page_width - 2 * MARGIN
-    styles = _make_styles(font_size)
-    limits = Limits.scaled(clip_scale)
-
-    header = HeaderBand(
-        company_name=company_name,
-        stamp=stamp,
-        recommendation=analysis.executive_summary.recommendation,
-        confidence_pct=analysis.executive_summary.confidence_pct,
-        width=content_width,
-        font_size=font_size,
-        logo_path=logo_path,
-    )
-
-    left_width = content_width * 0.29
-    middle_width = content_width * 0.42
-    right_width = content_width - left_width - middle_width - 2 * GUTTER
-
-    columns = [
-        (_scorecard(analysis, left_width, font_size, styles), left_width),
-        (_executive_summary(analysis, middle_width, styles, limits), middle_width),
-        (_scenarios(analysis, right_width, font_size, styles, limits), right_width),
+    meta = analysis.metadata
+    analysis_date = meta.analysis_date or f"{stamp:%d %B %Y}"
+    pairs = [
+        ("Source document", meta.source_document, "Analysis date", analysis_date),
+        ("Company status", meta.company_status, meta.milestone_label, meta.milestone_value),
+        ("Regulatory plan", meta.regulatory_plan, "Commercialization", meta.commercialization),
+        ("Funding ask", meta.funding_ask, "Valuation / terms", meta.valuation_terms),
+        ("Financials", meta.financials, "Cap table / runway", meta.cap_table_runway),
     ]
+    table = document.add_table(rows=1 + len(pairs), cols=4)
+    try:
+        table.style = "Table Grid"
+    except KeyError:  # pragma: no cover
+        pass
+    for index, header in enumerate(("Field", "Detail", "Field", "Detail")):
+        cell = table.rows[0].cells[index]
+        _shade(cell, HEADER_FILL)
+        _cell_text(cell, header, bold=True, color=WHITE)
+    for row_index, values in enumerate(pairs, start=1):
+        for col_index, value in enumerate(values):
+            _cell_text(table.rows[row_index].cells[col_index], str(value),
+                       bold=col_index % 2 == 0)
+    _widths(table, [0.18, 0.32, 0.18, 0.32])
+    _para(document, space_after=6)
 
-    bands = [
-        ("top risks", _risks(analysis, content_width, styles, limits)),
-        ("diligence questions", _questions(analysis, content_width, styles, limits)),
-        ("footer", _footer(analysis, content_width, styles, limits, stamp)),
-    ]
-
-    layout = _Layout(
-        page_size=page_size, header=header, columns=columns, bands=bands
-    )
-    layout.band_heights = {
-        "header": header.height,
-        "scorecard / summary / scenarios": max(
-            stack.height() for stack, _ in columns
-        ),
-        **{name: stack.height() for name, stack in bands},
-    }
-    layout.required = (
-        sum(layout.band_heights.values()) + BAND_GAP * (len(layout.band_heights) - 1)
-    )
-    layout.available = page_height - 2 * MARGIN
-    return layout
-
-
-# --------------------------------------------------------------------------- #
-# Bands
-# --------------------------------------------------------------------------- #
-
-
-def _scorecard(
-    analysis: AnalysisResult, width: float, font_size: float, styles: dict
-) -> Stack:
-    stack = Stack(width)
-    stack.add(Paragraph("SCORECARD", styles["heading"]), gap=3.0)
-    stack.add(ScoreBars(analysis.scores.category_rows(), width, font_size), gap=4.0)
-    stack.add(
-        Paragraph(
-            f"<b>Weighted overall {analysis.scores.weighted_overall:.1f}/10</b> "
-            f"&nbsp;·&nbsp; Decision quality {analysis.scores.decision_quality:.1f}/10",
-            styles["note"],
-        )
-    )
-    return stack
-
-
-def _executive_summary(
-    analysis: AnalysisResult, width: float, styles: dict, limits: Limits
-) -> Stack:
-    summary = analysis.executive_summary
-    stack = Stack(width)
-    stack.add(Paragraph("EXECUTIVE SUMMARY", styles["heading"]), gap=3.0)
-    stack.add(
-        Paragraph(
-            escape(_clip(summary.investment_thesis, limits.thesis)), styles["body"]
-        ),
-        gap=4.0,
-    )
-
-    stack.add(Paragraph("STRENGTHS", styles["subheading"]), gap=1.5)
-    for item in summary.top_strengths[:3]:
-        stack.add(Paragraph(_bullet(item, GREEN, limits.bullet), styles["bullet"]), gap=1.0)
-
-    stack.add(Paragraph("CONCERNS", styles["subheading"]), gap=1.5)
-    for item in summary.top_concerns[:3]:
-        stack.add(Paragraph(_bullet(item, RED, limits.bullet), styles["bullet"]), gap=1.0)
-    return stack
-
-
-def _scenarios(
-    analysis: AnalysisResult,
-    width: float,
-    font_size: float,
-    styles: dict,
-    limits: Limits,
-) -> Stack:
-    stack = Stack(width)
-    stack.add(Paragraph("SCENARIOS", styles["heading"]), gap=3.0)
-
-    rows = (
-        ("Best", analysis.scenarios.best, GREEN),
-        ("Base", analysis.scenarios.base, AMBER),
-        ("Worst", analysis.scenarios.worst, RED),
-    )
-    for name, scenario, color in rows:
-        stack.add(
-            ScenarioBar(name, scenario.probability_pct, width, font_size, color),
-            gap=1.0,
-        )
-        drivers = "  ".join(
-            f"&#183;&nbsp;{escape(_clip(driver, limits.driver))}"
-            for driver in scenario.drivers[:2]
-        )
-        if drivers:
-            stack.add(Paragraph(drivers, styles["driver"]), gap=4.0)
-
-    stack.add(
-        Paragraph(
-            "<b>Expected outcome.</b> "
-            + escape(_clip(analysis.expected_risk_adjusted_outcome, limits.outcome)),
-            styles["note"],
-        )
-    )
-    return stack
-
-
-def _risks(
-    analysis: AnalysisResult, width: float, styles: dict, limits: Limits
-) -> Stack:
-    stack = Stack(width)
-    stack.add(Paragraph("TOP RISKS", styles["heading"]), gap=3.0)
-
-    if not analysis.risks:
-        stack.add(Paragraph("No risks were identified in the deck.", styles["body"]))
-        return stack
-
-    shown = analysis.risks[:MAX_RISK_ROWS]
-    data = [
-        [
-            Paragraph("Risk", styles["table_head"]),
-            Paragraph("Prob / Impact", styles["table_head"]),
-            Paragraph("Mitigation", styles["table_head"]),
-        ]
-    ]
-    for risk in shown:
-        data.append(
-            [
-                Paragraph(
-                    f"<b>{escape(risk.category)}.</b> "
-                    f"{escape(_clip(risk.description, limits.risk))}",
-                    styles["table_cell"],
-                ),
-                Paragraph(
-                    f'<font color="{_hex(LEVEL_COLORS[risk.probability])}">'
-                    f"<b>{risk.probability}</b></font> / "
-                    f'<font color="{_hex(LEVEL_COLORS[risk.impact])}">'
-                    f"<b>{risk.impact}</b></font>",
-                    styles["table_cell"],
-                ),
-                Paragraph(
-                    escape(_clip(risk.mitigation, limits.risk)), styles["table_cell"]
-                ),
-            ]
-        )
-
-    column_widths = [width * 0.44, width * 0.13, width * 0.43]
-    table = Table(data, colWidths=column_widths, hAlign="LEFT")
-    table.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), PANEL),
-                ("LINEBELOW", (0, 0), (-1, -1), 0.4, RULE),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("ALIGN", (1, 0), (1, -1), "CENTER"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 3),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 3),
-                ("TOPPADDING", (0, 0), (-1, -1), 2.5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
-            ]
-        )
-    )
-    stack.add(table, gap=2.0)
-
-    hidden = len(analysis.risks) - len(shown)
-    if hidden > 0:
-        stack.add(
-            Paragraph(
-                f"{hidden} further risk{'s' if hidden > 1 else ''} identified — "
-                f"see the full analysis.",
-                styles["note"],
-            )
-        )
-    return stack
-
-
-def _questions(
-    analysis: AnalysisResult, width: float, styles: dict, limits: Limits
-) -> Stack:
-    stack = Stack(width)
-    stack.add(Paragraph("TOP 5 DILIGENCE QUESTIONS", styles["heading"]), gap=3.0)
-
-    questions = analysis.top_diligence_questions[:MAX_QUESTIONS]
-    if not questions:
-        stack.add(Paragraph("None specified.", styles["body"]))
-        return stack
-
-    for number, question in enumerate(questions, start=1):
-        stack.add(
-            Paragraph(
-                f"<b>{number}.</b>&nbsp; {escape(_clip(question, limits.question))}",
-                styles["bullet"],
+    _callout(
+        document,
+        Callout(
+            title=f"RECOMMENDATION:  {analysis.recommendation.upper()}"
+            + (f"  ·  {analysis.executive_summary.recommendation_qualifier}"
+               if analysis.executive_summary.recommendation_qualifier else ""),
+            body=(
+                f"Overall Decision Confidence: {analysis.confidence_pct}%.  "
+                f"Weighted Decision Intelligence Score: "
+                f"{analysis.weighted_overall:.1f} / 10.  "
+                f"{analysis.verdict_paragraph}"
             ),
-            gap=1.0,
-        )
-    return stack
-
-
-def _footer(
-    analysis: AnalysisResult,
-    width: float,
-    styles: dict,
-    limits: Limits,
-    stamp: date,
-) -> Stack:
-    stack = Stack(width)
-
-    cases = Table(
-        [
-            [
-                Paragraph(
-                    f'<font color="{_hex(GREEN)}"><b>BULL CASE</b></font><br/>'
-                    f"{escape(_clip(analysis.bull_case, limits.case))}",
-                    styles["footer_cell"],
-                ),
-                Paragraph(
-                    f'<font color="{_hex(RED)}"><b>BEAR CASE</b></font><br/>'
-                    f"{escape(_clip(analysis.bear_case, limits.case))}",
-                    styles["footer_cell"],
-                ),
-            ]
-        ],
-        colWidths=[width / 2 - GUTTER / 2, width / 2 - GUTTER / 2],
-        hAlign="LEFT",
+            critical=True,
+        ),
     )
-    cases.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (0, 0), 0),
-                ("RIGHTPADDING", (0, 0), (-1, -1), GUTTER / 2),
-                ("TOPPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-                ("LINEABOVE", (0, 0), (-1, 0), 0.7, RULE),
-                ("TOPPADDING", (0, 0), (-1, 0), 4),
-            ]
-        )
-    )
-    stack.add(cases, gap=3.0)
 
+    if analysis.scoring_fairness_note:
+        _para(document, analysis.scoring_fairness_note, bold=True, space_after=6)
+
+
+def _part_executive_summary(document, analysis: AnalysisResult) -> None:
     summary = analysis.executive_summary
-    stack.add(
-        Paragraph(
-            f"Recommendation: <b>{escape(summary.recommendation)}</b> &nbsp;·&nbsp; "
-            f"Confidence: <b>{summary.confidence_pct}%</b> &nbsp;·&nbsp; "
-            f"Generated by TEN Capital Decision Intelligence · {stamp:%Y-%m-%d}",
-            styles["footer_line"],
+    _h1(document, "Executive Summary")
+
+    _h2(document, "Investment Recommendation")
+    verdict = analysis.recommendation.upper()
+    if summary.recommendation_qualifier:
+        verdict += f"   — {summary.recommendation_qualifier}"
+    _para(document, verdict, size=SIZE_VERDICT, bold=True, color=CRIMSON, space_after=4)
+    if summary.confidence_note:
+        _para(document, f"Overall Decision Confidence: {analysis.confidence_pct}%  "
+                        f"— {summary.confidence_note}", bold=True)
+
+    _h2(document, "Key Investment Thesis")
+    for paragraph in summary.key_investment_thesis:
+        _para(document, paragraph)
+
+    _h2(document, "Top Three Strengths")
+    _bullets(document, summary.top_strengths[:3], numbered=True)
+
+    _h2(document, "Top Three Concerns")
+    _bullets(document, summary.top_concerns[:3], numbered=True)
+
+
+def _part_assessment(document, analysis: AnalysisResult) -> None:
+    _h1(document, "Decision Intelligence Assessment")
+
+    for number, (key, title, _weight) in enumerate(CATEGORIES, start=1):
+        section = analysis.assessment.section(key)
+        _h2(document, f"{number}.  {title} — Score {section.score} / 10")
+        _subsections(document, section.subsections)
+
+        for callout in section.callouts:
+            _callout(document, callout)
+
+        _section_table(document, key, analysis)
+
+        if section.diligence_questions:
+            _h3(document, "Recommended diligence questions")
+            _bullets(document, section.diligence_questions, bold=False, numbered=True)
+
+
+def _section_table(document, key: str, analysis: AnalysisResult) -> None:
+    """Attach the table that belongs to this assessment section, if any."""
+    if key == "market_opportunity" and analysis.market_sizing:
+        _h3(document, "Market sizing as presented")
+        _grid(document, ["Layer", "As stated", "Assessment"],
+              [(r.layer, r.as_stated, r.assessment) for r in analysis.market_sizing],
+              [0.24, 0.36, 0.40])
+
+    elif key == "competitive_intelligence" and analysis.competitors:
+        _h3(document, "What the summary does not mention")
+        _grid(document, ["Competitor", "Type", "Why it competes"],
+              [(r.competitor, r.type, r.why_it_competes) for r in analysis.competitors],
+              [0.24, 0.22, 0.54])
+
+    elif key == "traction_evidence" and analysis.evidence_quality:
+        _h3(document, "What has actually been demonstrated")
+        _grid(document, ["Evidence", "What it demonstrates", "What it does not demonstrate"],
+              [(r.evidence, r.demonstrates, r.does_not_demonstrate)
+               for r in analysis.evidence_quality],
+              [0.24, 0.38, 0.38])
+
+    elif key == "financial_intelligence" and analysis.sensitivity:
+        _h3(document, "Sensitivity analysis on forecast assumptions")
+        _grid(document, ["Variable", "Stated", "What determines it", "Effect if adverse"],
+              [(r.variable, r.stated, r.determined_by, r.effect_if_adverse)
+               for r in analysis.sensitivity],
+              [0.24, 0.16, 0.26, 0.34])
+
+    elif key == "risk_intelligence" and analysis.risk_register:
+        _h3(document, "Ranked risk register")
+        _grid(document, ["#", "Risk", "Prob.", "Impact", "Mitigation strategy"],
+              [(str(i), f"{r.category} — {r.risk}", r.probability, r.impact, r.mitigation)
+               for i, r in enumerate(analysis.risk_register, start=1)],
+              [0.04, 0.34, 0.10, 0.10, 0.42])
+
+    elif key == "assumption_mapping" and analysis.assumptions:
+        _h3(document, "The critical assumptions")
+        _grid(document,
+              ["#", "Assumption", "Evidence presented", "Confidence", "Validation needed"],
+              [(str(i), r.assumption, r.evidence, r.confidence, r.validation)
+               for i, r in enumerate(analysis.assumptions, start=1)],
+              [0.04, 0.28, 0.26, 0.11, 0.31])
+
+
+def _part_scenarios(document, analysis: AnalysisResult) -> None:
+    _h1(document, "Decision Scenario Analysis")
+
+    for label, scenario in analysis.scenarios.ordered():
+        _h2(document, f"{label} — Probability {scenario.probability_pct}%")
+        if scenario.narrative:
+            _para(document, scenario.narrative)
+        if scenario.drivers:
+            _h3(document, "Key drivers")
+            _bullets(document, scenario.drivers)
+
+    _h2(document, "Probability-weighted outcome")
+    _grid(document, ["Scenario", "Probability", "Gross multiple", "Weighted", "Cumulative"],
+          analysis.scenario_table(), [0.22, 0.16, 0.24, 0.19, 0.19])
+
+    for callout in (analysis.basis_of_analysis, analysis.expected_outcome_callout):
+        if callout is not None:
+            _callout(document, callout)
+
+
+def _part_committee_view(document, analysis: AnalysisResult) -> None:
+    view = analysis.committee_view
+    _h1(document, "Investment Committee View")
+
+    _h2(document, "Bull Case — The Strongest Argument For Investing")
+    _para(document, view.bull_case)
+
+    _h2(document, "Bear Case — The Strongest Argument Against Investing")
+    _para(document, view.bear_case)
+
+    _h2(document, "Missing Information — What Would Materially Improve Decision Quality")
+    if view.would_enable_a_decision:
+        _h3(document, "Would make a decision possible at all")
+        _bullets(document, view.would_enable_a_decision)
+    if view.would_change_the_assessment:
+        _h3(document, "Would materially change the assessment")
+        _bullets(document, view.would_change_the_assessment)
+
+
+def _part_scorecard(document, analysis: AnalysisResult) -> None:
+    _h1(document, "Decision Intelligence Scorecard")
+
+    rows = [
+        (
+            CATEGORY_TITLES[row.category],
+            f"{row.score} / 10",
+            f"{row.weight}%",
+            f"{row.weighted:.2f}",
+            row.driver,
+        )
+        for row in analysis.scorecard_rows()
+    ]
+    rows.append(
+        (
+            "WEIGHTED OVERALL SCORE",
+            f"{analysis.weighted_overall:.1f} / 10",
+            "100%",
+            f"{analysis.weighted_overall:.2f}",
+            "",
         )
     )
-    return stack
+    _grid(document, ["Category", "Score", "Weight", "Weighted", "Principal driver of the score"],
+          rows, [0.22, 0.09, 0.08, 0.10, 0.51], bold_last_row=True)
+
+    composite = analysis.composite
+    _h2(document, "Composite indices")
+    _grid(document, ["Index", "Value", "Interpretation"],
+          [
+              ("Weighted Overall Score", f"{analysis.weighted_overall:.1f} / 10",
+               composite.weighted_interpretation),
+              ("Confidence Score", f"{analysis.confidence_pct}%",
+               composite.confidence_interpretation),
+              ("Decision Quality Score", f"{composite.decision_quality:.1f} / 10",
+               composite.decision_quality_interpretation),
+          ],
+          [0.22, 0.12, 0.66])
+
+    if analysis.comparative_context:
+        _h2(document, "Comparative context across this cycle")
+        _grid(document, ["Company", "DI score", "Confidence", "Character of the central issue"],
+              [(r.company, r.di_score, r.confidence, r.central_issue)
+               for r in analysis.comparative_context],
+              [0.22, 0.11, 0.12, 0.55])
 
 
-# --------------------------------------------------------------------------- #
-# Styles and text helpers
-# --------------------------------------------------------------------------- #
+def _part_final(document, analysis: AnalysisResult) -> None:
+    final = analysis.final
+    _h1(document, "Final Recommendation")
 
+    if final.how_to_approach:
+        _h2(document, "How to approach this")
+        _para(document, final.how_to_approach)
 
-def _make_styles(font_size: float) -> dict[str, ParagraphStyle]:
-    leading = font_size * 1.22
-    return {
-        "heading": ParagraphStyle(
-            "heading",
-            fontName=FONT_BOLD,
-            fontSize=font_size + 0.5,
-            leading=(font_size + 0.5) * 1.15,
-            textColor=INK,
-        ),
-        "subheading": ParagraphStyle(
-            "subheading",
-            fontName=FONT_BOLD,
-            fontSize=font_size - 0.5,
-            leading=(font_size - 0.5) * 1.2,
-            textColor=MUTED,
-        ),
-        "body": ParagraphStyle(
-            "body",
-            fontName=FONT,
-            fontSize=font_size,
-            leading=leading,
-            textColor=BODY,
-        ),
-        "bullet": ParagraphStyle(
-            "bullet",
-            fontName=FONT,
-            fontSize=font_size,
-            leading=leading,
-            textColor=BODY,
-            leftIndent=7,
-            firstLineIndent=-7,
-        ),
-        "note": ParagraphStyle(
-            "note",
-            fontName=FONT,
-            fontSize=font_size - 0.5,
-            leading=(font_size - 0.5) * 1.25,
-            textColor=MUTED,
-        ),
-        "driver": ParagraphStyle(
-            "driver",
-            fontName=FONT,
-            fontSize=font_size - 0.5,
-            leading=(font_size - 0.5) * 1.25,
-            textColor=MUTED,
-        ),
-        "table_head": ParagraphStyle(
-            "table_head",
-            fontName=FONT_BOLD,
-            fontSize=font_size - 0.5,
-            leading=(font_size - 0.5) * 1.2,
-            textColor=INK,
-        ),
-        "table_cell": ParagraphStyle(
-            "table_cell",
-            fontName=FONT,
-            fontSize=font_size - 0.5,
-            leading=(font_size - 0.5) * 1.22,
-            textColor=BODY,
-        ),
-        "footer_cell": ParagraphStyle(
-            "footer_cell",
-            fontName=FONT,
-            fontSize=font_size - 0.5,
-            leading=(font_size - 0.5) * 1.25,
-            textColor=BODY,
-        ),
-        "footer_line": ParagraphStyle(
-            "footer_line",
-            fontName=FONT,
-            fontSize=font_size - 0.5,
-            leading=(font_size - 0.5) * 1.3,
-            textColor=MUTED,
-        ),
-    }
+    if final.top_five_diligence_questions:
+        _h2(document, "Top Five Diligence Questions")
+        _bullets(document, final.top_five_diligence_questions[:5], numbered=True)
 
+    if final.milestones:
+        _h2(document, "Key Milestones Required Before Investment")
+        _grid(document, ["#", "Milestone", "Why it matters"],
+              [(str(i), m.milestone, m.why_it_matters)
+               for i, m in enumerate(final.milestones, start=1)],
+              [0.05, 0.47, 0.48])
 
-def score_color(fraction: float) -> Color:
-    """Red at 0, amber at the midpoint, green at 10."""
-    fraction = max(0.0, min(1.0, fraction))
-    if fraction <= 0.5:
-        return _mix(RED, AMBER, fraction / 0.5)
-    return _mix(AMBER, GREEN, (fraction - 0.5) / 0.5)
+    if final.expected_risk_adjusted_outcome:
+        _h2(document, "Expected Risk-Adjusted Outcome")
+        _para(document, final.expected_risk_adjusted_outcome)
 
-
-def _mix(start: Color, end: Color, t: float) -> Color:
-    return Color(
-        start.red + (end.red - start.red) * t,
-        start.green + (end.green - start.green) * t,
-        start.blue + (end.blue - start.blue) * t,
+    qualifier = analysis.executive_summary.recommendation_qualifier
+    _callout(
+        document,
+        Callout(
+            title=f"{analysis.recommendation.upper()}  ·  Confidence Level "
+                  f"{analysis.confidence_pct}%"
+                  + (f"  ·  {qualifier}" if qualifier else ""),
+            body=final.expected_risk_adjusted_outcome or analysis.verdict_paragraph,
+            critical=True,
+        ),
     )
 
 
-def _format_score(value: float) -> str:
-    return f"{value:.0f}" if float(value).is_integer() else f"{value:.1f}"
-
-
-def _hex(color: Color) -> str:
-    """`#rrggbb` for ReportLab's inline `<font color="...">` markup."""
-    return "#" + color.hexval()[2:]
-
-
-def _bullet(text: str, color: Color, limit: int) -> str:
-    marker = f'<font color="{_hex(color)}">&#9642;</font>'
-    return f"{marker}&nbsp; {escape(_clip(text, limit))}"
-
-
-def _clip(text: str, limit: int) -> str:
-    cleaned = " ".join((text or "").split())
-    if len(cleaned) <= limit:
-        return cleaned
-    return cleaned[: limit - 1].rstrip(" ,;:.") + "…"
+def _part_memo(document, analysis: AnalysisResult) -> None:
+    _h1(document, "Summary Investment Memo")
+    _grid(document, ["Field", "Summary"], analysis.memo_rows, [0.22, 0.78])

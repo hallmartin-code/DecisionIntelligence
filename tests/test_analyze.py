@@ -31,10 +31,20 @@ def _text_response(text: str) -> MagicMock:
     return response
 
 
+def _stream(text: str) -> MagicMock:
+    """A context manager standing in for `client.messages.stream(...)`."""
+    context = MagicMock()
+    context.__enter__.return_value.get_final_message.return_value = _text_response(text)
+    context.__exit__.return_value = False
+    return context
+
+
 def _fake_client(*responses) -> MagicMock:
-    """A client whose `messages.create` returns/raises the given items in order."""
+    """A client whose `messages.stream` returns/raises the given items in order."""
     client = MagicMock()
-    client.messages.create.side_effect = list(responses)
+    client.messages.stream.side_effect = [
+        _stream(item) if isinstance(item, str) else item for item in responses
+    ]
     return client
 
 
@@ -59,55 +69,55 @@ def deck() -> DeckContent:
 
 
 def test_valid_json_validates_into_model(deck, analysis_payload):
-    client = _fake_client(_text_response(json.dumps(analysis_payload)))
+    client = _fake_client(json.dumps(analysis_payload))
 
     result = analyze_deck(deck, client=client, include_images=False)
 
     assert isinstance(result, AnalysisResult)
-    assert result.executive_summary.recommendation == "Investigate Further"
-    assert result.scores.problem_validation == 8
-    assert len(result.risks) == 4
-    assert client.messages.create.call_count == 1
+    assert result.recommendation == "Investigate Further"
+    assert result.assessment.problem_validation.score == 7
+    assert len(result.risk_register) == 3
+    assert client.messages.stream.call_count == 1
 
 
 def test_request_uses_expected_model_and_system_prompt(deck, analysis_payload):
-    client = _fake_client(_text_response(json.dumps(analysis_payload)))
+    client = _fake_client(json.dumps(analysis_payload))
 
     analyze_deck(deck, client=client, include_images=False)
 
-    kwargs = client.messages.create.call_args.kwargs
+    kwargs = client.messages.stream.call_args.kwargs
     assert kwargs["model"] == DEFAULT_MODEL
     assert "decision intelligence analyst" in kwargs["system"]
     assert kwargs["messages"][0]["role"] == "user"
 
 
 def test_images_are_sent_as_base64_blocks_before_text(deck, analysis_payload):
-    client = _fake_client(_text_response(json.dumps(analysis_payload)))
+    client = _fake_client(json.dumps(analysis_payload))
 
     analyze_deck(deck, client=client, include_images=True)
 
-    blocks = client.messages.create.call_args.kwargs["messages"][0]["content"]
+    blocks = client.messages.stream.call_args.kwargs["messages"][0]["content"]
     assert blocks[0]["type"] == "image"
     assert blocks[0]["source"]["media_type"] == "image/jpeg"
     assert blocks[-1]["type"] == "text"
 
 
 def test_no_images_flag_sends_text_only(deck, analysis_payload):
-    client = _fake_client(_text_response(json.dumps(analysis_payload)))
+    client = _fake_client(json.dumps(analysis_payload))
 
     analyze_deck(deck, client=client, include_images=False)
 
-    blocks = client.messages.create.call_args.kwargs["messages"][0]["content"]
+    blocks = client.messages.stream.call_args.kwargs["messages"][0]["content"]
     assert [block["type"] for block in blocks] == ["text"]
 
 
 def test_fenced_json_is_parsed(deck, analysis_payload):
     fenced = "Here you go:\n```json\n" + json.dumps(analysis_payload) + "\n```"
-    client = _fake_client(_text_response(fenced))
+    client = _fake_client(fenced)
 
     result = analyze_deck(deck, client=client, include_images=False)
 
-    assert result.scores.weighted_overall == pytest.approx(6.2)
+    assert result.weighted_overall == pytest.approx(4.59)
 
 
 # --------------------------------------------------------------------------- #
@@ -117,49 +127,51 @@ def test_fenced_json_is_parsed(deck, analysis_payload):
 
 def test_invalid_json_triggers_one_retry(deck, analysis_payload):
     client = _fake_client(
-        _text_response("I cannot produce JSON right now."),
-        _text_response(json.dumps(analysis_payload)),
+        "I cannot produce JSON right now.",
+        json.dumps(analysis_payload),
     )
 
     result = analyze_deck(deck, client=client, include_images=False)
 
     assert isinstance(result, AnalysisResult)
-    assert client.messages.create.call_count == 2
+    assert client.messages.stream.call_count == 2
 
-    retry_messages = client.messages.create.call_args.kwargs["messages"]
-    assert retry_messages[-1]["content"].startswith("Your previous response was not")
+    retry_messages = client.messages.stream.call_args.kwargs["messages"]
+    assert retry_messages[-1]["content"].startswith(
+        "Your previous response could not be used"
+    )
 
 
 def test_schema_violation_also_triggers_retry(deck, analysis_payload):
     broken = dict(analysis_payload)
     broken.pop("scenarios")
     client = _fake_client(
-        _text_response(json.dumps(broken)),
-        _text_response(json.dumps(analysis_payload)),
+        json.dumps(broken),
+        json.dumps(analysis_payload),
     )
 
     analyze_deck(deck, client=client, include_images=False)
 
-    assert client.messages.create.call_count == 2
+    assert client.messages.stream.call_count == 2
 
 
 def test_two_failures_raise_with_raw_response(deck):
     client = _fake_client(
-        _text_response("nope"),
-        _text_response("still nope"),
+        "nope",
+        "still nope",
     )
 
     with pytest.raises(InvalidJSONResponseError) as excinfo:
         analyze_deck(deck, client=client, include_images=False)
 
     assert excinfo.value.raw_response == "still nope"
-    assert client.messages.create.call_count == 2
+    assert client.messages.stream.call_count == 2
 
 
 def test_rate_limit_retries_then_succeeds(deck, analysis_payload):
     client = _fake_client(
         _rate_limit_error(),
-        _text_response(json.dumps(analysis_payload)),
+        json.dumps(analysis_payload),
     )
 
     with patch("pitch_analyzer.analyze.time.sleep") as sleep:
@@ -176,7 +188,7 @@ def test_rate_limit_gives_up_after_three_attempts(deck):
         with pytest.raises(RateLimitExceededError):
             analyze_deck(deck, client=client, include_images=False)
 
-    assert client.messages.create.call_count == 3
+    assert client.messages.stream.call_count == 3
 
 
 # --------------------------------------------------------------------------- #
@@ -194,10 +206,10 @@ def test_missing_api_key_raises(deck, monkeypatch):
 def test_user_prompt_contains_deck_text_and_schema():
     prompt = build_user_prompt("[Slide 1]\nAcme")
 
-    assert "PITCH DECK TEXT:" in prompt
+    assert "SOURCE MATERIAL:" in prompt
     assert "[Slide 1]" in prompt
-    assert '"weighted_overall"' in prompt
-    assert "Not presented" in prompt
+    assert '"risk_register"' in prompt
+    assert "Not disclosed" in prompt
 
 
 def test_build_user_content_orders_images_first():

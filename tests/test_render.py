@@ -1,36 +1,57 @@
-"""Rendering tests: output validity, one-page guarantee, and the overflow guard."""
+"""Renderer tests: the .docx must match `templates/report_structure.md`."""
 
 from __future__ import annotations
 
 from datetime import date
 
 import pytest
+from docx import Document
+from docx.oxml.ns import qn
 
-from pitch_analyzer.models import AnalysisResult
+from pitch_analyzer.models import CATEGORIES, CATEGORY_KEYS, AnalysisResult
 from pitch_analyzer.render import (
-    MIN_FONT_SIZE,
-    START_FONT_SIZE,
-    LayoutOverflowError,
-    _build_layout,
-    render_one_pager,
-    score_color,
+    CRIMSON,
+    HEADER_FILL,
+    NAVY,
+    PANEL_FILL,
+    render_report,
 )
 
-STAMP = date(2026, 8, 10)
+STAMP = date(2026, 8, 31)
+INCH = 914400
 
 
-def _page_count(path) -> int:
-    import pdfplumber
+@pytest.fixture
+def report(tmp_path, analysis_result):
+    path = render_report(analysis_result, tmp_path / "report.docx", generated_on=STAMP)
+    return Document(str(path))
 
-    with pdfplumber.open(str(path)) as pdf:
-        return len(pdf.pages)
+
+def _text(document) -> str:
+    parts = [p.text for p in document.paragraphs]
+    for table in document.tables:
+        for row in table.rows:
+            parts.extend(cell.text for cell in row.cells)
+    return "\n".join(parts)
 
 
-def _page_text(path) -> str:
-    import pdfplumber
+def _fill(cell) -> str | None:
+    properties = cell._tc.tcPr
+    if properties is None:
+        return None
+    shading = properties.find(qn("w:shd"))
+    return shading.get(qn("w:fill")) if shading is not None else None
 
-    with pdfplumber.open(str(path)) as pdf:
-        return "\n".join(page.extract_text() or "" for page in pdf.pages)
+
+def _headings(document, size_pt: float) -> list[str]:
+    return [
+        p.text
+        for p in document.paragraphs
+        if p.runs
+        and p.runs[0].font.size
+        and abs(p.runs[0].font.size.pt - size_pt) < 0.01
+        and p.runs[0].font.bold
+    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -38,267 +59,224 @@ def _page_text(path) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def test_render_creates_a_pdf_over_5kb(tmp_path, analysis_result):
-    output = tmp_path / "report.pdf"
+def test_render_writes_a_readable_docx(tmp_path, analysis_result):
+    output = tmp_path / "out.docx"
 
-    returned = render_one_pager(
-        analysis_result, output, company_name="Acme Robotics", generated_on=STAMP
-    )
+    returned = render_report(analysis_result, output, generated_on=STAMP)
 
     assert returned == output
     assert output.exists()
-    assert output.stat().st_size > 5 * 1024
+    assert output.stat().st_size > 10 * 1024
+    assert output.read_bytes()[:2] == b"PK"  # a zip container, i.e. real OOXML
 
 
-def test_output_is_exactly_one_landscape_page(tmp_path, analysis_result):
-    output = tmp_path / "landscape.pdf"
-    render_one_pager(analysis_result, output, generated_on=STAMP)
+def test_page_setup_matches_the_specification(report):
+    section = report.sections[0]
 
-    import pdfplumber
-
-    with pdfplumber.open(str(output)) as pdf:
-        assert len(pdf.pages) == 1
-        page = pdf.pages[0]
-        assert round(page.width) == 792
-        assert round(page.height) == 612
+    assert round(section.page_width / INCH, 2) == 8.5
+    assert round(section.page_height / INCH, 2) == 11.0
+    assert round(section.left_margin / INCH, 2) == 0.88
+    assert round(section.top_margin / INCH, 2) == 0.83
 
 
-def test_portrait_orientation(tmp_path, analysis_result):
-    output = tmp_path / "portrait.pdf"
-    render_one_pager(
-        analysis_result, output, orientation="portrait", generated_on=STAMP
-    )
+def test_footer_carries_the_company_and_a_page_field(report):
+    footer = report.sections[0].footer.paragraphs[0]
 
-    import pdfplumber
-
-    with pdfplumber.open(str(output)) as pdf:
-        assert len(pdf.pages) == 1
-        assert round(pdf.pages[0].width) == 612
-        assert round(pdf.pages[0].height) == 792
-
-
-def test_output_is_under_2mb(tmp_path, analysis_result):
-    output = tmp_path / "size.pdf"
-    render_one_pager(analysis_result, output, generated_on=STAMP)
-
-    assert output.stat().st_size < 2 * 1024 * 1024
-
-
-def test_bad_orientation_rejected(tmp_path, analysis_result):
-    with pytest.raises(ValueError, match="landscape"):
-        render_one_pager(analysis_result, tmp_path / "x.pdf", orientation="sideways")
+    assert "TEN Capital Group" in footer.text
+    assert "Acme Robotics" in footer.text
+    assert "Confidential" in footer.text
+    instructions = footer._p.findall(".//" + qn("w:instrText"))
+    assert [i.text.strip() for i in instructions] == ["PAGE", "NUMPAGES"]
 
 
 # --------------------------------------------------------------------------- #
-# Content
+# Document skeleton
 # --------------------------------------------------------------------------- #
 
 
-def test_all_ten_category_scores_appear(tmp_path, analysis_result):
-    output = tmp_path / "scores.pdf"
-    render_one_pager(
-        analysis_result, output, company_name="Acme Robotics", generated_on=STAMP
-    )
-    text = _page_text(output)
+def test_all_seven_parts_are_present_in_order(report):
+    assert _headings(report, 15.0) == [
+        "Executive Summary",
+        "Decision Intelligence Assessment",
+        "Decision Scenario Analysis",
+        "Investment Committee View",
+        "Decision Intelligence Scorecard",
+        "Final Recommendation",
+        "Summary Investment Memo",
+    ]
 
-    for label, _score in analysis_result.scores.category_rows():
-        assert label in text, f"missing scorecard row: {label}"
+
+def test_all_ten_categories_appear_numbered_and_scored(report):
+    h2 = _headings(report, 12.0)
+
+    for number, (_key, title, _weight) in enumerate(CATEGORIES, start=1):
+        assert any(
+            heading.startswith(f"{number}.  {title} — Score ") for heading in h2
+        ), f"missing assessment section: {title}"
 
 
-def test_key_sections_and_footer_present(tmp_path, analysis_result):
-    output = tmp_path / "content.pdf"
-    render_one_pager(
-        analysis_result, output, company_name="Acme Robotics", generated_on=STAMP
-    )
-    text = _page_text(output)
+def test_masthead_and_metadata(report):
+    text = _text(report)
 
+    assert "TEN CAPITAL GROUP" in text
+    assert "INVESTMENT COMMITTEE" in text
     assert "Acme Robotics" in text
-    assert "SCORECARD" in text
-    assert "EXECUTIVE SUMMARY" in text
-    assert "SCENARIOS" in text
-    assert "TOP RISKS" in text
-    assert "TOP 5 DILIGENCE QUESTIONS" in text
-    assert "BULL CASE" in text
-    assert "BEAR CASE" in text
-    assert "Generated by TEN Capital Decision Intelligence" in text
-    assert "2026-08-10" in text
+    assert "Warehouse picking automation for mid-size facilities" in text
+    assert "31 August 2026" in text
+    assert "Not disclosed" in text  # absent fields are stated, not blank
 
 
-def test_recommendation_badge_text_is_rendered(tmp_path, analysis_result):
-    output = tmp_path / "badge.pdf"
-    render_one_pager(analysis_result, output, generated_on=STAMP)
-    text = _page_text(output)
-
-    assert "INVESTIGATE FURTHER" in text
-    assert "62% CONF." in text
-
-
-@pytest.mark.parametrize(
-    ("recommendation", "expected_hex"),
-    [("Invest", "#16a34a"), ("Investigate Further", "#d97706"), ("Pass", "#dc2626")],
-)
-def test_badge_colour_matches_recommendation(
-    analysis_payload, recommendation, expected_hex
-):
-    from pitch_analyzer.render import BADGE_COLORS, _hex
-
-    analysis_payload["executive_summary"]["recommendation"] = recommendation
-    analysis = AnalysisResult.model_validate(analysis_payload)
-
-    color = BADGE_COLORS[analysis.executive_summary.recommendation]
-    assert _hex(color) == expected_hex
-
-
-def test_markup_characters_in_content_do_not_break_rendering(
-    tmp_path, analysis_payload
-):
-    analysis_payload["bull_case"] = "Margins >50% & <2yr payback for R&D <buyers>"
-    analysis_payload["executive_summary"]["investment_thesis"] = "A & B <C> \"quoted\""
-    analysis = AnalysisResult.model_validate(analysis_payload)
-
-    output = tmp_path / "escaped.pdf"
-    render_one_pager(analysis, output, generated_on=STAMP)
-
-    assert _page_count(output) == 1
-
-
-def test_extra_risks_are_disclosed_not_silently_dropped(tmp_path, analysis_payload):
-    extra = dict(analysis_payload["risks"][0])
-    extra["description"] = "A sixth risk that will not fit in the table."
-    analysis_payload["risks"] = analysis_payload["risks"] + [extra, dict(extra)]
-    analysis = AnalysisResult.model_validate(analysis_payload)
-
-    output = tmp_path / "many_risks.pdf"
-    render_one_pager(analysis, output, generated_on=STAMP)
-
-    assert "2 further risks identified" in _page_text(output)
+def test_scoring_fairness_note_is_carried(report):
+    assert "A note on scoring this document fairly" in _text(report)
 
 
 # --------------------------------------------------------------------------- #
-# Overflow guard
+# Tables
 # --------------------------------------------------------------------------- #
 
 
-def test_layout_fits_at_the_starting_font_size(analysis_result):
-    from reportlab.lib.pagesizes import landscape, letter
+def test_grid_tables_use_the_navy_header(report):
+    grids = [t for t in report.tables if len(t.columns) > 1]
 
-    layout = _build_layout(
-        analysis_result,
-        landscape(letter),
-        START_FONT_SIZE,
-        "Acme Robotics",
-        None,
-        STAMP,
+    assert len(grids) >= 10
+    for table in grids:
+        assert _fill(table.rows[0].cells[0]) == HEADER_FILL
+
+
+def test_callouts_are_shaded_panels(report):
+    callouts = [t for t in report.tables if len(t.columns) == 1]
+
+    assert len(callouts) >= 4
+    for table in callouts:
+        assert _fill(table.rows[0].cells[0]) == PANEL_FILL
+    titles = [t.cell(0, 0).paragraphs[0].text for t in callouts]
+    assert any(title.startswith("RECOMMENDATION:") for title in titles)
+    assert any("BASIS OF THIS ANALYSIS" in title for title in titles)
+
+
+def test_scorecard_arithmetic_closes(report, analysis_result):
+    scorecard = next(
+        t for t in report.tables
+        if t.rows[0].cells[0].text == "Category" and len(t.columns) == 5
     )
 
-    assert layout.fits
-    assert layout.required <= layout.available
+    assert len(scorecard.rows) == 12  # header + 10 categories + total
+    weighted_sum = 0.0
+    for row in scorecard.rows[1:-1]:
+        score = int(row.cells[1].text.split("/")[0].strip())
+        weight = int(row.cells[2].text.rstrip("%"))
+        weighted = float(row.cells[3].text)
+        assert weighted == pytest.approx(round(score * weight / 100, 2))
+        weighted_sum += weighted
+
+    total_row = scorecard.rows[-1]
+    assert total_row.cells[0].text == "WEIGHTED OVERALL SCORE"
+    assert total_row.cells[2].text == "100%"
+    assert float(total_row.cells[3].text) == pytest.approx(weighted_sum, abs=0.01)
+    assert weighted_sum == pytest.approx(analysis_result.weighted_overall, abs=0.01)
 
 
-def test_ordinary_analysis_is_not_truncated(tmp_path, analysis_result):
-    """Content of a normal size must survive the fit search intact."""
-    output = tmp_path / "untruncated.pdf"
-    render_one_pager(analysis_result, output, generated_on=STAMP)
-    text = " ".join(_page_text(output).split())
-
-    assert "…" not in text, "unexpected ellipsis: content was clipped"
-    assert "cost advantage survives volume manufacturing" in text
-    for question in analysis_result.top_diligence_questions:
-        assert question in text
-
-
-def test_fit_search_spends_text_budget_before_type_size(analysis_payload):
-    """A long analysis should shrink type before clipping hard."""
-    filler = "Extended narrative detail that keeps going and going. " * 12
-    analysis_payload["executive_summary"]["investment_thesis"] = filler
-    analysis_payload["top_diligence_questions"] = [filler] * 5
-    analysis_payload["bull_case"] = filler
-    analysis_payload["bear_case"] = filler
-    analysis = AnalysisResult.model_validate(analysis_payload)
-
-    from reportlab.lib.pagesizes import landscape, letter
-
-    from pitch_analyzer.render import ACCEPTABLE_CLIP_SCALE, _fit_layout
-
-    layout = _fit_layout(
-        analysis, landscape(letter), "Acme Robotics", None, STAMP
+def test_risk_register_is_numbered_and_prefixed(report):
+    register = next(
+        t for t in report.tables
+        if t.rows[0].cells[-1].text == "Mitigation strategy"
     )
 
-    assert layout.fits
-    # The chosen candidate should use most of the page rather than bailing out
-    # early onto a much tighter budget.
-    assert layout.required > layout.available * 0.75
-    assert ACCEPTABLE_CLIP_SCALE < 1.0  # guards the constant's meaning
+    assert [row.cells[0].text for row in register.rows[1:]] == ["1", "2", "3"]
+    assert register.rows[1].cells[1].text.startswith("REGULATORY — ")
 
 
-def test_oversized_content_shrinks_but_still_fits(tmp_path, analysis_payload):
-    # Long, multi-line strings everywhere force the guard to step the font down.
-    filler = "Extended narrative detail. " * 12
-    analysis_payload["executive_summary"]["investment_thesis"] = filler
-    analysis_payload["bull_case"] = filler
-    analysis_payload["bear_case"] = filler
-    analysis_payload["executive_summary"]["top_strengths"] = [filler] * 3
-    analysis_payload["executive_summary"]["top_concerns"] = [filler] * 3
-    analysis_payload["top_diligence_questions"] = [filler] * 5
-    for risk in analysis_payload["risks"]:
-        risk["description"] = filler
-        risk["mitigation"] = filler
+def test_scenario_table_accumulates(report):
+    scenarios = next(
+        t for t in report.tables if t.rows[0].cells[0].text == "Scenario"
+    )
+
+    cumulative = [row.cells[4].text for row in scenarios.rows[1:]]
+    assert cumulative == ["2.20x", "2.83x", "2.92x"]
+
+
+def test_memo_lists_all_nine_fields(report):
+    memo = report.tables[-1]
+
+    assert memo.rows[0].cells[0].text == "Field"
+    assert len(memo.rows) == 10
+    assert memo.rows[1].cells[0].text == "Company"
+    assert memo.rows[-1].cells[0].text == "Decision"
+
+
+def test_comparative_context_is_omitted_when_empty(report):
+    assert "Comparative context" not in _text(report)
+
+
+def test_comparative_context_renders_when_supplied(tmp_path, analysis_payload):
+    analysis_payload["comparative_context"] = [
+        {
+            "company": "Peer Co",
+            "di_score": "6.5 / 10",
+            "confidence": "74%",
+            "central_issue": "One answerable question.",
+        }
+    ]
     analysis = AnalysisResult.model_validate(analysis_payload)
 
-    output = tmp_path / "dense.pdf"
-    render_one_pager(analysis, output, generated_on=STAMP)
+    path = render_report(analysis, tmp_path / "peers.docx", generated_on=STAMP)
+    text = _text(Document(str(path)))
 
-    assert _page_count(output) == 1
-
-
-def test_overflow_raises_with_the_offending_section(tmp_path, analysis_result):
-    from reportlab.lib.pagesizes import landscape, letter
-
-    # A page too short for any font size in the range exercises the failure path.
-    tiny_page = (landscape(letter)[0], 120.0)
-
-    layout = _build_layout(
-        analysis_result, tiny_page, MIN_FONT_SIZE, "Acme Robotics", None, STAMP
-    )
-    assert not layout.fits
-    assert layout.overflow > 0
-    assert layout.tallest_band
-
-    import pitch_analyzer.render as render_module
-
-    original = render_module.letter
-    render_module.letter = (tiny_page[1], tiny_page[0])
-    try:
-        with pytest.raises(LayoutOverflowError) as excinfo:
-            render_one_pager(analysis_result, tmp_path / "overflow.pdf")
-    finally:
-        render_module.letter = original
-
-    message = str(excinfo.value)
-    assert "5.5pt" in message
-    assert "overflows by" in message
+    assert "Comparative context across this cycle" in text
+    assert "Peer Co" in text
 
 
 # --------------------------------------------------------------------------- #
-# Score gradient
+# Colour conventions
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize(
-    ("fraction", "dominant"),
-    [(0.0, "red"), (0.5, "amber"), (1.0, "green")],
-)
-def test_score_gradient_runs_red_to_green(fraction, dominant):
-    color = score_color(fraction)
+def test_adverse_bullets_are_set_in_crimson(report):
+    crimson = [
+        run.text
+        for p in report.paragraphs
+        for run in p.runs
+        if run.font.color and run.font.color.rgb == CRIMSON
+    ]
 
-    if dominant == "red":
-        assert color.red > color.green
-    elif dominant == "green":
-        assert color.green > color.red
-    else:
-        assert color.red > 0.5 and color.green > 0.3
+    assert any("unsourced" in text for text in crimson)
+    assert any("INVESTIGATE FURTHER" in text for text in crimson)
 
 
-def test_score_gradient_clamps_out_of_range_input():
-    assert score_color(-1.0).hexval() == score_color(0.0).hexval()
-    assert score_color(5.0).hexval() == score_color(1.0).hexval()
+def test_part_headings_are_navy(report):
+    navy = [
+        p.text
+        for p in report.paragraphs
+        if p.runs and p.runs[0].font.color and p.runs[0].font.color.rgb == NAVY
+    ]
+
+    assert "Executive Summary" in navy
+    assert "Acme Robotics" in navy
+
+
+# --------------------------------------------------------------------------- #
+# Degenerate input
+# --------------------------------------------------------------------------- #
+
+
+def test_renders_with_empty_optional_tables(tmp_path, analysis_payload):
+    for key in ("market_sizing", "competitors", "evidence_quality",
+                "sensitivity", "risk_register", "assumptions"):
+        analysis_payload[key] = []
+    analysis_payload["basis_of_analysis"] = None
+    analysis_payload["expected_outcome_callout"] = None
+    analysis = AnalysisResult.model_validate(analysis_payload)
+
+    path = render_report(analysis, tmp_path / "sparse.docx", generated_on=STAMP)
+
+    assert path.stat().st_size > 5 * 1024
+    assert len(_headings(Document(str(path)), 15.0)) == 7
+
+
+def test_markup_characters_survive(tmp_path, analysis_payload):
+    analysis_payload["verdict_paragraph"] = "Margins >50% & <2yr payback for R&D"
+    analysis = AnalysisResult.model_validate(analysis_payload)
+
+    path = render_report(analysis, tmp_path / "escaped.docx", generated_on=STAMP)
+
+    assert "Margins >50% & <2yr payback" in _text(Document(str(path)))

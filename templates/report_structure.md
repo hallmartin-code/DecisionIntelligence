@@ -1,16 +1,11 @@
-# Decision Intelligence One-Pager — Document Structure Template
+# Decision Intelligence Assessment — Document Structure
 
-The canonical structure for every report the app generates. It defines the
-page, the bands, the fields in each band, and the constraints on those fields.
-No company data appears here — only placeholders and allowed value sets.
+The canonical structure for the full Decision Intelligence report, derived from
+`Noleus_Decision_Intelligence_Analysis.docx`. It defines the page, the type
+scale, the palette, every section in document order, every table's columns, and
+the content conventions that give the document its voice.
 
-Placeholders use `{{ field_name }}` and map to the analysis schema in
-`src/pitch_analyzer/models.py`. Rendering is implemented in
-`src/pitch_analyzer/render.py`.
-
-A rendered, placeholder-filled version of this template is at
-[`report_template.pdf`](report_template.pdf) — regenerate it with
-`python templates/make_report_template.py`.
+Placeholders use `{{ field }}`. No company-specific content appears here.
 
 ---
 
@@ -18,239 +13,288 @@ A rendered, placeholder-filled version of this template is at
 
 | Property | Value |
 |---|---|
-| Page size | US Letter (8.5 × 11 in) |
-| Orientation | `landscape` (default, 792 × 612 pt) or `portrait` (612 × 792 pt) |
-| Page count | Exactly 1 — never more, never fewer |
-| Margin | 22 pt on all sides |
-| Column gutter | 10 pt |
-| Font family | Helvetica / Helvetica-Bold (ReportLab built-in; no external fonts) |
-| Body type size | 8.0 pt preferred, stepping down by 0.5 pt to a 5.5 pt floor |
-| File size | Under 2 MB |
+| Page size | US Letter, **portrait** (8.5 × 11 in) |
+| Margins | 0.88 in left/right, 0.83 in top/bottom |
+| Length | Multi-page — typically 8–14 pages. **No one-page constraint.** |
+| Body font | Calibri throughout (headings and body) |
+| Footer | `TEN Capital Group · Decision Intelligence Assessment · {{ company_name }} · Confidential` + `Page X of Y` (right-aligned tab) |
+| Header | Empty |
 
-### Colour tokens
+### Palette
 
 | Token | Hex | Used for |
 |---|---|---|
-| Ink | `#111827` | Headings, values |
-| Body | `#1f2937` | Body copy |
-| Muted | `#6b7280` | Secondary notes, footer line |
-| Rule | `#d1d5db` | Dividers, table lines |
-| Track | `#e5e7eb` | Unfilled bar track |
-| Panel | `#f3f4f6` | Table header fill |
-| Green | `#16a34a` | Invest, strengths, bull case, Low risk level |
-| Amber | `#d97706` | Investigate Further, Medium risk level |
-| Red | `#dc2626` | Pass, concerns, bear case, High risk level |
+| Navy | `#1F3864` | Document title, H1, H3, table header fill, neutral callout titles |
+| Blue | `#2E74B5` | Brand line, H2 |
+| Crimson | `#A6192E` | Recommendation line, adverse findings, flagged assumptions, critical callout titles |
+| Grey | `#595959` | Eyebrow, tagline, secondary metadata |
+| Panel | `#F5F7FA` | Callout box fill |
+| Body | default (near-black) | Body copy |
 
----
+### Type scale
 
-## 2. Band structure
-
-The page is five bands stacked top to bottom. Leftover vertical space is shared
-between bands (up to 20 pt each) so the page reads as composed rather than
-top-heavy.
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│ BAND 1  HEADER          {{ company_name }} · date · recommendation badge │
-├──────────────────┬───────────────────────────┬──────────────────────────┤
-│ BAND 2a          │ BAND 2b                   │ BAND 2c                  │
-│ SCORECARD        │ EXECUTIVE SUMMARY         │ SCENARIOS                │
-│ (29% width)      │ (42% width)               │ (remaining width)        │
-├──────────────────┴───────────────────────────┴──────────────────────────┤
-│ BAND 3  TOP RISKS                    Risk · Prob/Impact · Mitigation     │
-├─────────────────────────────────────────────────────────────────────────┤
-│ BAND 4  TOP 5 DILIGENCE QUESTIONS                                        │
-├─────────────────────────────────────────────────────────────────────────┤
-│ BAND 5  FOOTER          Bull case · Bear case · attribution line         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 3. Band 1 — Header
-
-| Element | Placeholder | Source | Format |
+| Element | Size | Weight | Colour |
 |---|---|---|---|
-| Company name | `{{ company_name }}` | Inferred from the deck title slide | Bold, body size + 6 pt, clipped at 60 chars |
-| Subtitle | `Decision Intelligence Analysis · {{ report_date }}` | Run date | Muted, body size, date as `DD Month YYYY` |
-| Badge | `{{ recommendation }} · {{ confidence_pct }}% CONF.` | `executive_summary` | Uppercase, white on a filled rounded rect, right-aligned |
-| Logo | *(optional)* | `--logo PATH` | Left of the company name, scaled to badge height |
-| Rule | — | — | 0.7 pt hairline beneath the band |
+| Brand line (`TEN CAPITAL GROUP`) | 10 pt | Bold | Blue |
+| Eyebrow (`INVESTMENT COMMITTEE · DECISION INTELLIGENCE ASSESSMENT`) | 8 pt | Regular | Grey |
+| Company name | 25 pt | Bold | Navy |
+| Tagline / one-line descriptor | 11 pt | Regular | Grey |
+| H1 (part title) | 15 pt | Bold | Navy |
+| H2 (section) | 12 pt | Bold | Blue |
+| H3 (sub-section) | 10.5 pt | Bold | Navy |
+| Body | 10 pt | Regular | Body |
+| Emphasised body / list items | 10 pt | Bold | Body (crimson when adverse) |
 
-**Badge colour is determined by recommendation and must not vary:**
+### Two recurring components
 
-| `{{ recommendation }}` | Badge fill |
-|---|---|
-| `Invest` | Green `#16a34a` |
-| `Investigate Further` | Amber `#d97706` |
-| `Pass` | Red `#dc2626` |
+**Grid table.** Header row filled navy with white bold text; body rows plain
+with hairline rules. Used for every structured table below.
 
----
-
-## 4. Band 2a — Scorecard
-
-A fixed list of **exactly 10 category scores**, always in this order, always all
-present. Each row is `label · gradient bar · numeric value`.
-
-| # | Row label | Schema field |
-|---|---|---|
-| 1 | Problem Validation | `scores.problem_validation` |
-| 2 | Solution Strength | `scores.solution_strength` |
-| 3 | Market Opportunity | `scores.market_opportunity` |
-| 4 | Competitive Position | `scores.competitive_position` |
-| 5 | Business Model | `scores.business_model` |
-| 6 | Traction | `scores.traction` |
-| 7 | Team | `scores.team` |
-| 8 | Financial Quality | `scores.financial_quality` |
-| 9 | Risk Profile | `scores.risk_profile` |
-| 10 | Investment Attract. | `scores.investment_attractiveness` |
-
-- **Value range:** integer `0`–`10`.
-- **Bar fill:** proportional to score, coloured on a continuous red → amber →
-  green ramp (red at 0, amber at 5, green at 10).
-- **Summary line** beneath the bars:
-  `Weighted overall {{ weighted_overall }}/10 · Decision quality {{ decision_quality }}/10`
-  — both floats `0.0`–`10.0`, rendered to one decimal.
+**Callout box.** A single-cell table filled `#F5F7FA`, opening with an
+ALL-CAPS title line — navy for neutral/positive, crimson for critical — then a
+paragraph of body text. Used for the recommendation, key findings, and
+framing statements.
 
 ---
 
-## 5. Band 2b — Executive summary
+## 2. Document order
 
-| Element | Placeholder | Constraint |
-|---|---|---|
-| Heading | `EXECUTIVE SUMMARY` | Fixed |
-| Thesis | `{{ investment_thesis }}` | Free text, budget 520 chars |
-| Sub-heading | `STRENGTHS` | Fixed |
-| Strengths | `{{ top_strength_1 }}` … `{{ top_strength_3 }}` | Exactly 3 rendered, green square bullet, 210 chars each |
-| Sub-heading | `CONCERNS` | Fixed |
-| Concerns | `{{ top_concern_1 }}` … `{{ top_concern_3 }}` | Exactly 3 rendered, red square bullet, 210 chars each |
+```
+Brand block  →  Metadata table  →  Recommendation callout  →  Scoring note
+PART 1  Executive Summary
+PART 2  Decision Intelligence Assessment   (10 numbered categories)
+PART 3  Decision Scenario Analysis
+PART 4  Investment Committee View
+PART 5  Decision Intelligence Scorecard
+PART 6  Final Recommendation
+PART 7  Summary Investment Memo
+```
 
 ---
 
-## 6. Band 2c — Scenarios
+## 3. Masthead
 
-Exactly three scenario rows, always in this order.
-
-| Row | Schema field | Bar colour |
-|---|---|---|
-| `Best` | `scenarios.best` | Green |
-| `Base` | `scenarios.base` | Amber |
-| `Worst` | `scenarios.worst` | Red |
-
-Each row renders as:
+Four stacked paragraphs, no rule:
 
 ```
-{{ scenario_name }}   [====== bar ======]   {{ probability_pct }}%
-· {{ driver_1 }}  · {{ driver_2 }}
+TEN CAPITAL GROUP
+INVESTMENT COMMITTEE  ·  DECISION INTELLIGENCE ASSESSMENT
+{{ company_name }}
+{{ one_line_descriptor }}
 ```
 
-- `probability_pct` — integer `0`–`100`. The three values are expected to total
-  100 but are **not** normalised by the renderer.
-- Up to **2 drivers** per scenario, 120 chars each.
+### Metadata table — 6 rows × 4 columns
 
-Closing line for the band:
+A `Field | Detail | Field | Detail` grid (two field/value pairs per row):
 
-```
-Expected outcome. {{ expected_risk_adjusted_outcome }}
-```
-— budget 260 chars.
-
----
-
-## 7. Band 3 — Top risks
-
-A three-column table with a fixed header row.
-
-| Column | Width | Placeholder | Constraint |
+| Field | Detail | Field | Detail |
 |---|---|---|---|
-| `Risk` | 44% | `{{ risk_category }}. {{ risk_description }}` | Category bold, description 190 chars |
-| `Prob / Impact` | 13% | `{{ probability }} / {{ impact }}` | Centred, each word coloured by level |
-| `Mitigation` | 43% | `{{ mitigation }}` | 190 chars |
+| Source document | `{{ source_document }}` | Analysis date | `{{ analysis_date }}` |
+| Company status | `{{ company_status }}` | `{{ milestone_label }}` | `{{ milestone_value }}` |
+| Regulatory plan | `{{ regulatory_plan }}` | Commercialization | `{{ commercialization }}` |
+| Funding ask | `{{ funding_ask }}` | Valuation / terms | `{{ valuation_terms }}` |
+| Financials | `{{ financials }}` | Cap table / runway | `{{ cap_table_runway }}` |
 
-**Allowed values**
+Rows 2–3 carry sector-appropriate labels. Anything absent from the source reads
+**`Not disclosed`** — never blank, never inferred.
 
-- `risk_category` — `Market` · `Product` · `Execution` · `Financial` ·
-  `Regulatory` · `Competitive`
-- `probability`, `impact` — `Low` (green) · `Medium` (amber) · `High` (red)
+### Recommendation callout
 
-**Row cap.** A maximum of **4 rows** is rendered. Any remainder must be
-disclosed, never dropped silently:
+Critical callout (crimson lead), carrying the verdict and the three headline
+numbers in prose:
 
 ```
-{{ n }} further risks identified — see the full analysis.
+RECOMMENDATION:  {{ recommendation }}  ·  {{ recommendation_qualifier }}
+Overall Decision Confidence: {{ confidence_pct }}%.  Weighted Decision
+Intelligence Score: {{ weighted_overall }} / 10.  {{ verdict_paragraph }}
 ```
 
----
+### Scoring-fairness note
 
-## 8. Band 4 — Top 5 diligence questions
+A short bold paragraph, present whenever the source material is thinner than a
+full deck. It states what the format cannot carry and commits to the distinction
+the whole document rests on:
 
-| Element | Placeholder | Constraint |
-|---|---|---|
-| Heading | `TOP 5 DILIGENCE QUESTIONS` | Fixed |
-| Items | `1.` … `5.` `{{ diligence_question_n }}` | Max 5, numbered, 240 chars each |
-
-If the analysis returns none, render `None specified.` rather than an empty band.
-
----
-
-## 9. Band 5 — Footer
-
-Two equal columns above a single attribution line, separated from Band 4 by a
-0.7 pt rule.
-
-| Element | Placeholder | Constraint |
-|---|---|---|
-| Left column | `BULL CASE` (green label) + `{{ bull_case }}` | 420 chars |
-| Right column | `BEAR CASE` (red label) + `{{ bear_case }}` | 420 chars |
-| Attribution | `Recommendation: {{ recommendation }} · Confidence: {{ confidence_pct }}% · Generated by TEN Capital Decision Intelligence · {{ report_date_iso }}` | Muted; `report_date_iso` as `YYYY-MM-DD` |
-
-The attribution line is **required on every report** and its wording is fixed.
+> **Information missing because of the format** — noted, not scored against the
+> company. **Claims inaccurate or internally inconsistent within the space the
+> company did use** — scored.
 
 ---
 
-## 10. Fitting the page
+## 4. PART 1 — Executive Summary
 
-The report is always exactly one page. Before drawing, every band is measured.
-If the stack does not fit:
-
-1. Step the type size down through `8.0 → 7.5 → 7.0 → 6.5 → 6.0 → 5.5` pt.
-2. At each size, find the largest text budget that still fits (bisection over a
-   `0.60`–`1.60` multiplier on the per-field character budgets above).
-3. Stop at the first size that carries an acceptable budget (`≥ 0.90`).
-
-Type size is only spent once text has been, so a normal-length analysis renders
-at 8 pt with nothing clipped. Clipped fields end with an ellipsis. If nothing
-fits at 5.5 pt, raise `LayoutOverflowError` naming the offending band rather
-than emitting a broken page.
-
----
-
-## 11. Fields captured but not rendered
-
-The analysis schema collects more than the one-pager shows. These fields are
-validated and available on the `AnalysisResult` object for downstream documents
-(IC memo, founder Q&A, diligence pack) and must remain in the schema:
-
-| Field | Shape |
+| H2 | Content |
 |---|---|
-| `sections` | 8 sections, each `{ score, observations, missing, questions[] }` — `problem_validation`, `solution_effectiveness`, `market_opportunity`, `competitive_intelligence`, `business_model`, `traction_evidence`, `team_assessment`, `financial_intelligence` |
-| `assumptions[]` | `{ assumption, evidence, confidence, validation }`; `confidence` ∈ `Low` · `Medium` · `High` |
-| `missing_information[]` | Free-text list |
-| `key_milestones_before_investment[]` | Free-text list |
-| `risks[]` beyond the 4 rendered | Full list retained |
-| `top_diligence_questions[]` beyond the 5 rendered | Full list retained |
+| Investment Recommendation | Verdict line, 13 pt bold crimson: `{{ recommendation }} — {{ qualifier }}`. Then `Overall Decision Confidence: {{ confidence_pct }}%` with a sentence on what raises and what caps it. |
+| Key Investment Thesis | 3–5 body paragraphs: the problem and its economics, the mechanism, the strongest element, and a closing sentence naming what breaks the thesis. |
+| Top Three Strengths | Exactly 3 numbered items. Each opens with a **bold claim sentence**, then evidence. |
+| Top Three Concerns | Exactly 3 numbered items, same shape. |
 
 ---
 
-## 12. Content rules
+## 5. PART 2 — Decision Intelligence Assessment
 
-1. **Every band is always present.** A band with no data renders an explicit
-   empty-state string, never a blank gap.
-2. **Nothing is dropped silently.** Capped lists disclose the remainder; clipped
-   text ends in an ellipsis.
-3. **Absent information is stated, not inferred.** Where the deck does not cover
-   a point, the analysis says `Not presented` rather than speculating.
-4. **Slide citations are preserved.** Where the analysis cites a slide, keep the
-   `(Slide N)` reference in the rendered text.
-5. **Fixed vocabularies are closed sets.** Recommendation, risk category, and
-   probability/impact levels accept only the values listed above.
+Ten numbered H2 sections, always in this order, each headed
+`{{ n }}.  {{ category }} — Score {{ score }} / 10`:
+
+| # | Category | Weight |
+|---|---|---|
+| 1 | Problem Validation | 10% |
+| 2 | Solution Effectiveness | 12% |
+| 3 | Market Opportunity | 10% |
+| 4 | Competitive Intelligence | 8% |
+| 5 | Business Model Intelligence | 10% |
+| 6 | Traction & Evidence Quality | 12% |
+| 7 | Team Assessment | 15% |
+| 8 | Financial Intelligence | 10% |
+| 9 | Risk Intelligence | 8% |
+| 10 | Assumption Mapping | 5% |
+
+Each section carries 3–5 H3 sub-sections. The first is a question the section
+answers; the last is **`Recommended diligence questions`** (a plain numbered
+list, regular weight — the only list in the document that is not bold).
+
+### Section-specific structures
+
+**3. Market Opportunity** — `Market sizing as presented`, a 7 × 3 grid:
+
+| Layer | As stated | Assessment |
+|---|---|---|
+| US procedure volume · Global volume · US TAM · Global TAM · SAM · SOM | `{{ as_stated }}` | `{{ assessment }}` |
+
+Unstated layers read `Not stated` / `—`.
+
+**4. Competitive Intelligence** — `What the summary does not mention`, a 7 × 3 grid:
+
+| Competitor | Type | Why it competes |
+|---|---|---|
+
+**6. Traction & Evidence Quality** — a 6 × 3 grid:
+
+| Evidence | What it demonstrates | What it does not demonstrate |
+|---|---|---|
+
+**8. Financial Intelligence** — `Sensitivity analysis`, a 7 × 4 grid:
+
+| Variable | Stated | What determines it | Effect if adverse |
+|---|---|---|---|
+
+**9. Risk Intelligence** — `Ranked risk register`, a 15 × 5 grid (up to 14 risks,
+ranked most severe first):
+
+| # | Risk | Prob. | Impact | Mitigation strategy |
+|---|---|---|---|---|
+
+`Risk` opens with an ALL-CAPS category prefix — `REGULATORY —`, `FINANCIAL —`,
+`PRODUCT/CLINICAL —`, `PRODUCT/SCIENCE —`, `COMMERCIAL —`, `EXECUTION —`,
+`COMPETITIVE —`, `MARKET —`. `Prob.` and `Impact` take `Low` · `Low-Medium` ·
+`Medium` · `Medium-High` · `High`. A `Risk category summary` H3 follows.
+
+**10. Assumption Mapping** — `The Ten Critical Assumptions`, an 11 × 5 grid:
+
+| # | Assumption | Evidence presented | Confidence | Validation needed |
+|---|---|---|---|---|
+
+`Confidence` takes `LOW` · `LOW-MED` · `MEDIUM` · `MED-HIGH` · `HIGH` ·
+`UNKNOWN` (uppercase). Closes with an **assumption-concentration callout**
+naming which assumptions carry the outcome.
+
+---
+
+## 6. PART 3 — Decision Scenario Analysis
+
+Three H2 sections — `Best Case — Probability {{ pct }}%`, `Base Case`,
+`Worst Case` — each a narrative paragraph plus an H3 `Key drivers` list.
+Probabilities must total 100%.
+
+Then `Probability-weighted outcome`, a 4 × 5 grid:
+
+| Scenario | Probability | Gross multiple | Weighted | Cumulative |
+|---|---|---|---|---|
+
+Two callouts close the part: **`BASIS OF THIS ANALYSIS`** (states what the
+multiples are computed against, and says so plainly when no terms are
+disclosed) and **`EXPECTED RISK-ADJUSTED OUTCOME`**.
+
+---
+
+## 7. PART 4 — Investment Committee View
+
+| H2 | Content |
+|---|---|
+| Bull Case — The Strongest Argument For Investing | The best honest case, stated without hedging. |
+| Bear Case — The Strongest Argument Against Investing | The same, inverted. |
+| Missing Information — What Would Materially Improve Decision Quality | Two H3 lists: **`Would make a decision possible at all`** and **`Would materially change the assessment`**. |
+
+---
+
+## 8. PART 5 — Decision Intelligence Scorecard
+
+A 12 × 5 grid — ten category rows plus a bold total row:
+
+| Category | Score | Weight | Weighted | Principal driver of the score |
+|---|---|---|---|---|
+| `{{ category }}` | `{{ score }} / 10` | `{{ weight }}%` | `{{ score × weight }}` | `{{ one_line_rationale }}` |
+| **WEIGHTED OVERALL SCORE** | **`{{ weighted_overall }} / 10`** | **100%** | **`{{ computed }}`** | **`{{ verdict_phrase }}`** |
+
+`Composite indices`, a 4 × 3 grid:
+
+| Index | Value | Interpretation |
+|---|---|---|
+| Weighted Overall Score | `{{ weighted_overall }} / 10` | … |
+| Confidence Score | `{{ confidence_pct }}%` | … |
+| Decision Quality Score | `{{ decision_quality }} / 10` | How well the material supports a rational decision |
+
+`Comparative context across this cycle`, a 5 × 4 grid placing this company
+against others assessed in the same period:
+
+| Company | DI score | Confidence | Character of the central issue |
+|---|---|---|---|
+
+> Omit this table when no comparison set exists — never populate it with
+> invented peers.
+
+---
+
+## 9. PART 6 — Final Recommendation
+
+| H2 | Content |
+|---|---|
+| How to approach this | The practical next move, in prose. |
+| Top Five Diligence Questions | Exactly 5, numbered. |
+| Key Milestones Required Before Investment | An 11 × 3 grid: `# \| Milestone \| Why it matters` (up to 10). |
+| Expected Risk-Adjusted Outcome | Prose, closing on a **critical callout**: `{{ recommendation }} · Confidence Level {{ confidence_pct }}% · {{ qualifier }}`. |
+
+---
+
+## 10. PART 7 — Summary Investment Memo
+
+A 9 × 2 `Field | Summary` grid — the one-screen version for a reader who opens
+nothing else:
+
+| Field |
+|---|
+| Company · Recommendation · Decision confidence · Weighted DI score · Funding ask · Strongest element · Central issue · Next step · Decision |
+
+---
+
+## 11. Content rules
+
+1. **Absent means absent.** Anything the source does not contain reads
+   `Not disclosed` or `Not stated`. Never inferred, never estimated, never
+   left blank.
+2. **Separate format from substance.** Information missing because the source
+   format cannot carry it is noted but not scored against the company. Claims
+   that are inaccurate or self-contradictory *within* the material provided are
+   scored.
+3. **Check the checkable.** Claims that can be verified against public knowledge
+   — competitor existence, approval dates, arithmetic consistency — are checked,
+   and a failed check is stated plainly with the contradicting fact.
+4. **Adverse findings are set in crimson**, at bullet level, so a reader
+   scanning the document sees the problems without reading it.
+5. **Score the document, cite the document.** Every score is justified by a
+   one-line driver in the scorecard that traces to a section above.
+6. **Arithmetic must close.** Weighted column = score × weight; the total row
+   must equal the sum. Scenario probabilities must total 100%.
+7. **State the decision type.** Where no terms are disclosed, the document says
+   explicitly that this is a screening decision, not an investment decision.

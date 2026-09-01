@@ -1,7 +1,7 @@
 """Email the finished analysis to the team via Resend.
 
 Notification is strictly best-effort: a delivery problem is recorded and
-reported, but never fails an analysis that already succeeded. The report PDF
+reported, but never fails an analysis that already succeeded. The report
 rides along as an attachment so the email is self-contained.
 """
 
@@ -22,7 +22,7 @@ REQUEST_TIMEOUT_SECONDS = 30.0
 DEFAULT_RECIPIENT = "Info@tencapital.group"
 DEFAULT_SENDER = "TEN Capital Deck Analyzer <deck-analyzer@tencapital.group>"
 
-# Resend caps a request at 40 MB; our one-pagers are ~10 KB, so this only
+# Resend caps a request at 40 MB; our reports are tens of KB, so this only
 # guards against a pathological render.
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
@@ -120,10 +120,9 @@ def build_message(
     model: str,
     slide_count: int = 0,
 ) -> dict:
-    summary = analysis.executive_summary
     subject = (
-        f"{summary.recommendation} - {company_name} - "
-        f"{analysis.scores.weighted_overall:.1f}/10"
+        f"{analysis.recommendation} - {company_name} - "
+        f"{analysis.weighted_overall:.1f}/10"
     )
 
     message: dict = {
@@ -152,7 +151,7 @@ def _attachment(report_path: Path, company_name: str) -> Optional[dict]:
         for character in company_name
     ).strip()
     return {
-        "filename": f"{safe or 'deck'} - Decision Intelligence.pdf",
+        "filename": f"{safe or 'deck'} - Decision Intelligence.docx",
         "content": base64.standard_b64encode(payload).decode("ascii"),
     }
 
@@ -166,15 +165,15 @@ def _render_text(
 ) -> str:
     summary = analysis.executive_summary
     lines = [
-        f"{company_name} - Decision Intelligence Analysis",
+        f"{company_name} - Decision Intelligence Assessment",
         "",
-        f"Recommendation: {summary.recommendation} "
-        f"({summary.confidence_pct}% confidence)",
-        f"Weighted overall: {analysis.scores.weighted_overall:.1f}/10",
-        f"Decision quality: {analysis.scores.decision_quality:.1f}/10",
+        f"Recommendation: {analysis.recommendation} "
+        f"({analysis.confidence_pct}% confidence)",
+        f"Weighted overall: {analysis.weighted_overall:.1f}/10",
+        f"Decision quality: {analysis.composite.decision_quality:.1f}/10",
         "",
         "THESIS",
-        summary.investment_thesis,
+        *summary.key_investment_thesis[:1],
         "",
         "STRENGTHS",
     ]
@@ -182,27 +181,26 @@ def _render_text(
     lines += ["", "CONCERNS"]
     lines += [f"  - {item}" for item in summary.top_concerns[:3]]
 
-    if analysis.risks:
+    if analysis.risk_register:
         lines += ["", "TOP RISKS"]
         lines += [
-            f"  - [{risk.category}] {risk.description} "
+            f"  - [{risk.category}] {risk.risk} "
             f"(probability {risk.probability}, impact {risk.impact})"
-            for risk in analysis.risks[:4]
+            for risk in analysis.risk_register[:4]
         ]
 
-    if analysis.top_diligence_questions:
+    questions = analysis.final.top_five_diligence_questions
+    if questions:
         lines += ["", "TOP DILIGENCE QUESTIONS"]
         lines += [
             f"  {number}. {question}"
-            for number, question in enumerate(
-                analysis.top_diligence_questions[:5], start=1
-            )
+            for number, question in enumerate(questions[:5], start=1)
         ]
 
     slides = f" ({slide_count} slides)" if slide_count else ""
     lines += [
         "",
-        "The full one-pager is attached as a PDF.",
+        "The full report is attached as a Word document.",
         "",
         f"Source deck: {deck_filename}{slides}",
         f"Model: {model}",
@@ -231,12 +229,12 @@ def _risks_block(analysis: AnalysisResult) -> str:
         '<tr>'
         '<td style="padding:7px 10px;border-bottom:1px solid #e5e7eb;'
         'font-size:13px;color:#1f2937">'
-        f'<strong>{escape(risk.category)}.</strong> {escape(risk.description)}</td>'
+        f'<strong>{escape(risk.category)}.</strong> {escape(risk.risk)}</td>'
         '<td style="padding:7px 10px;border-bottom:1px solid #e5e7eb;'
         'font-size:12px;color:#6b7280;white-space:nowrap">'
         f'{escape(risk.probability)} / {escape(risk.impact)}</td>'
         '</tr>'
-        for risk in analysis.risks[:4]
+        for risk in analysis.risk_register[:4]
     )
     if not rows:
         return ""
@@ -252,7 +250,7 @@ def _risks_block(analysis: AnalysisResult) -> str:
 def _questions_block(analysis: AnalysisResult) -> str:
     items = "".join(
         f'<li style="margin:0 0 6px;color:#1f2937">{escape(question)}</li>'
-        for question in analysis.top_diligence_questions[:5]
+        for question in analysis.final.top_five_diligence_questions[:5]
     )
     if not items:
         return ""
@@ -271,7 +269,7 @@ def _render_html(
     slide_count: int,
 ) -> str:
     summary = analysis.executive_summary
-    badge = BADGE_COLORS.get(summary.recommendation, "#d97706")
+    badge = BADGE_COLORS.get(analysis.recommendation, "#d97706")
     slides = f" &middot; {slide_count} slides" if slide_count else ""
 
     return (
@@ -291,15 +289,15 @@ def _render_html(
         '<p style="margin:0 0 18px">'
         f'<span style="display:inline-block;padding:6px 12px;border-radius:5px;'
         f'background:{badge};color:#ffffff;font-weight:700;font-size:13px;'
-        f'letter-spacing:.03em">{escape(summary.recommendation.upper())} &middot; '
-        f'{summary.confidence_pct}% CONFIDENCE</span></p>'
+        f'letter-spacing:.03em">{escape(analysis.recommendation.upper())} &middot; '
+        f'{analysis.confidence_pct}% CONFIDENCE</span></p>'
         '<p style="margin:0 0 20px;font-size:13px;color:#6b7280">Weighted overall '
-        f'<strong style="color:#111827">{analysis.scores.weighted_overall:.1f}/10'
+        f'<strong style="color:#111827">{analysis.weighted_overall:.1f}/10'
         '</strong> &middot; Decision quality '
-        f'<strong style="color:#111827">{analysis.scores.decision_quality:.1f}/10'
+        f'<strong style="color:#111827">{analysis.composite.decision_quality:.1f}/10'
         "</strong></p>"
         '<p style="margin:0 0 22px;font-size:14px;line-height:1.6;color:#1f2937">'
-        f"{escape(summary.investment_thesis)}</p>"
+        f"{escape(summary.key_investment_thesis[0] if summary.key_investment_thesis else '')}</p>"
         + _section_heading("Strengths", "#16a34a")
         + '<ul style="margin:0 0 20px;padding-left:18px;font-size:13.5px;'
         'line-height:1.55">' + _bullets(summary.top_strengths, "#16a34a") + "</ul>"
@@ -309,7 +307,7 @@ def _render_html(
         + _risks_block(analysis)
         + _questions_block(analysis)
         + '<p style="margin:0 0 6px;padding-top:16px;border-top:1px solid #e5e7eb;'
-        'font-size:13px;color:#1f2937">The full one-pager is attached as a PDF.</p>'
+        'font-size:13px;color:#1f2937">The full report is attached as a Word document.</p>'
         '<p style="margin:0;font-size:11.5px;color:#6b7280">Source deck: '
         f"{escape(deck_filename)}{slides} &middot; Model: {escape(model)}<br>"
         "Generated by TEN Capital Decision Intelligence</p>"

@@ -4,7 +4,7 @@
 <form class="card" id="upload-form" method="post" action="/analyze"
       enctype="multipart/form-data" novalidate>
   <div class="eyebrow">Deck Analyzer</div>
-  <h1>Pitch Deck<span class="arrow">&rarr;</span><span class="to">Investor One&#8209;Pager</span></h1>
+  <h1>Pitch Deck<span class="arrow">&rarr;</span><span class="to">Decision Intelligence</span></h1>
   <p class="lede">
     Upload a pitch deck and get a polished single-page investor PDF, analyzed
     and structured by Claude.
@@ -41,13 +41,6 @@
     <summary>Analysis options</summary>
     <div class="options-grid">
       <div class="field">
-        <label for="orientation">Page orientation</label>
-        <select id="orientation" name="orientation">
-          <option value="landscape" selected>Landscape</option>
-          <option value="portrait">Portrait</option>
-        </select>
-      </div>
-      <div class="field">
         <label for="model">Model</label>
         <input id="model" type="text" name="model" value="{{ default_model }}"
                spellcheck="false" autocomplete="off">
@@ -65,13 +58,13 @@
     </div>
   </details>
 
-  <button class="cta" type="submit" id="submit-button">Generate one-pager PDF</button>
+  <button class="cta" type="submit" id="submit-button">Generate the report</button>
 
   <div class="disclosure">
     The deck is processed on the server, held only for as long as the analysis
     needs, and deleted automatically within {{ job_ttl_minutes }} minutes.
     {% if email_recipients %}
-    A copy of every finished one-pager is emailed to
+    A copy of every finished report is emailed to
     {% for address in email_recipients %}<code>{{ address }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.
     {% else %}
     It is not emailed or shared with anyone.

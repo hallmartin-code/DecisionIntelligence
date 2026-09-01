@@ -12,95 +12,20 @@ from typing import Any, Callable, Optional
 
 from .ingest import DeckContent
 from .models import AnalysisResult
+from .prompt import SYSTEM_PROMPT, build_user_prompt
 
 DEFAULT_MODEL = "claude-sonnet-4-5"
-MAX_TOKENS = 16000
+MAX_TOKENS = 48000  # the full report is long; leaves headroom over a ~25k typical
 RATE_LIMIT_ATTEMPTS = 3
 BACKOFF_BASE_SECONDS = 2.0
 
-SYSTEM_PROMPT = """You are a world-class venture capitalist, decision intelligence analyst, and
-investment committee member. You will receive the extracted text (and optionally
-slide images) from a startup pitch deck. Your task is to produce a structured
-Decision Intelligence analysis and return it as a single valid JSON object that
-conforms EXACTLY to the schema provided. Do not add prose outside the JSON."""
-
-JSON_SCHEMA = """{
-  "executive_summary": {
-    "recommendation": "Invest | Investigate Further | Pass",
-    "confidence_pct": 0,
-    "investment_thesis": "",
-    "top_strengths": ["", "", ""],
-    "top_concerns":   ["", "", ""]
-  },
-  "scores": {
-    "problem_validation":   0,
-    "solution_strength":    0,
-    "market_opportunity":   0,
-    "competitive_position": 0,
-    "business_model":       0,
-    "traction":             0,
-    "team":                 0,
-    "financial_quality":    0,
-    "risk_profile":         0,
-    "investment_attractiveness": 0,
-    "weighted_overall":     0.0,
-    "decision_quality":     0.0
-  },
-  "sections": {
-    "problem_validation":      { "score": 0, "observations": "", "missing": "", "questions": [""] },
-    "solution_effectiveness":  { "score": 0, "observations": "", "missing": "", "questions": [""] },
-    "market_opportunity":      { "score": 0, "observations": "", "missing": "", "questions": [""] },
-    "competitive_intelligence":{ "score": 0, "observations": "", "missing": "", "questions": [""] },
-    "business_model":          { "score": 0, "observations": "", "missing": "", "questions": [""] },
-    "traction_evidence":       { "score": 0, "observations": "", "missing": "", "questions": [""] },
-    "team_assessment":         { "score": 0, "observations": "", "missing": "", "questions": [""] },
-    "financial_intelligence":  { "score": 0, "observations": "", "missing": "", "questions": [""] }
-  },
-  "risks": [
-    {
-      "category": "Market | Product | Execution | Financial | Regulatory | Competitive",
-      "description": "",
-      "probability": "Low | Medium | High",
-      "impact":      "Low | Medium | High",
-      "mitigation":  ""
-    }
-  ],
-  "assumptions": [
-    {
-      "assumption":   "",
-      "evidence":     "",
-      "confidence":   "Low | Medium | High",
-      "validation":   ""
-    }
-  ],
-  "scenarios": {
-    "best":  { "probability_pct": 0, "drivers": [""] },
-    "base":  { "probability_pct": 0, "drivers": [""] },
-    "worst": { "probability_pct": 0, "drivers": [""] }
-  },
-  "bull_case": "",
-  "bear_case": "",
-  "missing_information": [""],
-  "top_diligence_questions": ["", "", "", "", ""],
-  "key_milestones_before_investment": [""],
-  "expected_risk_adjusted_outcome": ""
-}"""
-
-USER_PROMPT_TEMPLATE = """PITCH DECK TEXT:
-{deck_text}
-
-INSTRUCTIONS:
-Analyze the deck using the Decision Intelligence framework below and return
-a JSON object matching the schema exactly. Be specific and evidence-based;
-cite slide numbers when possible. If information is absent from the deck,
-say "Not presented" rather than speculating.
-
-OUTPUT SCHEMA:
-{json_schema}"""
-
-RETRY_CORRECTION = (
-    "Your previous response was not valid JSON. Return only the JSON object."
-)
+def _correction_message(problem: str) -> str:
+    """Tell the model exactly what failed, so the retry is targeted."""
+    return (
+        f"Your previous response could not be used: {problem}\n\n"
+        "Return the corrected JSON object only — no prose, no code fence — "
+        "including every required field."
+    )
 
 
 class MissingAPIKeyError(RuntimeError):
@@ -120,10 +45,6 @@ class InvalidJSONResponseError(RuntimeError):
     def __init__(self, message: str, raw_response: str) -> None:
         super().__init__(message)
         self.raw_response = raw_response
-
-
-def build_user_prompt(deck_text: str) -> str:
-    return USER_PROMPT_TEMPLATE.format(deck_text=deck_text, json_schema=JSON_SCHEMA)
 
 
 def build_user_content(deck_text: str, images: list[bytes]) -> list[dict[str, Any]]:
@@ -168,11 +89,14 @@ def analyze_deck(
 
     raw = ""
     last_error = ""
+    last_problem = "the response was not valid JSON"
     for attempt in range(2):
         if attempt:
-            emit("Response was not valid JSON — retrying with a correction.")
+            emit("Retrying with a targeted correction.")
             messages.append({"role": "assistant", "content": raw or "(empty)"})
-            messages.append({"role": "user", "content": RETRY_CORRECTION})
+            messages.append(
+                {"role": "user", "content": _correction_message(last_problem)}
+            )
 
         raw = _request_with_backoff(client, model, messages, emit)
         emit(f"Received {len(raw)} characters from {model}.")
@@ -182,12 +106,31 @@ def analyze_deck(
             return AnalysisResult.model_validate(payload)
         except Exception as error:  # json.JSONDecodeError or pydantic.ValidationError
             last_error = str(error)
-            emit(f"Validation failed: {last_error.splitlines()[0]}")
+            last_problem = _describe_validation(error)
+            emit(f"Validation failed: {last_problem}")
 
     raise InvalidJSONResponseError(
         f"The model did not return schema-valid JSON after 2 attempts: {last_error}",
         raw,
     )
+
+
+def _describe_validation(error: Exception) -> str:
+    """Name the offending fields, so a schema mismatch is diagnosable."""
+    errors = getattr(error, "errors", None)
+    if not callable(errors):
+        return str(error).splitlines()[0]
+    try:
+        details = errors()
+    except Exception:  # pragma: no cover - defensive
+        return str(error).splitlines()[0]
+
+    parts = [
+        ".".join(str(piece) for piece in item.get("loc", ())) + f" ({item.get('msg', '')})"
+        for item in details[:5]
+    ]
+    suffix = f" and {len(details) - 5} more" if len(details) > 5 else ""
+    return f"{len(details)} error(s): " + "; ".join(parts) + suffix
 
 
 # --------------------------------------------------------------------------- #
@@ -215,13 +158,16 @@ def _request_with_backoff(
 
     for attempt in range(RATE_LIMIT_ATTEMPTS):
         try:
-            response = client.messages.create(
+            # The report is long enough that the SDK refuses a non-streaming
+            # request at this max_tokens, and a streamed call also survives a
+            # run that takes several minutes.
+            with client.messages.stream(
                 model=model,
                 max_tokens=MAX_TOKENS,
                 system=SYSTEM_PROMPT,
                 messages=messages,
-            )
-            return _response_text(response)
+            ) as stream:
+                return _response_text(stream.get_final_message())
         except anthropic.RateLimitError:
             if attempt == RATE_LIMIT_ATTEMPTS - 1:
                 raise RateLimitExceededError(

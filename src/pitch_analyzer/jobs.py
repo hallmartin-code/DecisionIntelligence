@@ -29,7 +29,7 @@ from .analyze import (
 )
 from .ingest import UnsupportedDeckError, guess_company_name, ingest
 from .notify import notify_report_ready
-from .render import LayoutOverflowError, render_one_pager
+from .render import RenderError, render_report
 
 
 class JobState(str, Enum):
@@ -62,7 +62,7 @@ STATE_LABELS = {
     JobState.QUEUED: "Queued",
     JobState.READING: "Reading the deck",
     JobState.ANALYZING: "Analyzing with Claude",
-    JobState.RENDERING: "Rendering the one-pager",
+    JobState.RENDERING: "Building the report",
     JobState.DONE: "Complete",
     JobState.FAILED: "Failed",
 }
@@ -74,7 +74,6 @@ class Job:
 
     id: str
     filename: str
-    orientation: str
     model: str
     include_images: bool
     workdir: Path
@@ -102,7 +101,7 @@ class Job:
     @property
     def report_filename(self) -> str:
         stem = Path(self.filename).stem or "deck"
-        return f"{stem}_analysis.pdf"
+        return f"{stem}_analysis.docx"
 
     def as_dict(self) -> dict:
         return {
@@ -151,7 +150,6 @@ class JobStore:
         self,
         filename: str,
         payload: bytes,
-        orientation: str = "landscape",
         model: str = DEFAULT_MODEL,
         include_images: bool = True,
         api_key: Optional[str] = None,
@@ -167,7 +165,6 @@ class JobStore:
         job = Job(
             id=job_id,
             filename=Path(filename).name,
-            orientation=orientation,
             model=model,
             include_images=include_images,
             workdir=workdir,
@@ -237,18 +234,14 @@ class JobStore:
                 include_images=job.include_images,
                 log=job.log.append,
             )
-            job.recommendation = analysis.executive_summary.recommendation
-            job.confidence_pct = analysis.executive_summary.confidence_pct
-            job.weighted_overall = analysis.scores.weighted_overall
+            job.company_name = analysis.company_name or job.company_name
+            job.recommendation = analysis.recommendation
+            job.confidence_pct = analysis.confidence_pct
+            job.weighted_overall = analysis.weighted_overall
 
             job.state = JobState.RENDERING
             report_path = job.workdir / job.report_filename
-            render_one_pager(
-                analysis,
-                report_path,
-                company_name=job.company_name or "Pitch Deck",
-                orientation=job.orientation,
-            )
+            render_report(analysis, report_path)
             job.report_path = report_path
             job.log.append("Report rendered.")
 
@@ -291,8 +284,8 @@ def _friendly_error(error: Exception) -> str:
             "The model did not return a valid analysis after two attempts. "
             "Try again, or run with a different model."
         )
-    if isinstance(error, LayoutOverflowError):
-        return f"The report could not be fitted onto one page. {error}"
+    if isinstance(error, RenderError):
+        return f"The report could not be built. {error}"
     if isinstance(error, RuntimeError):
         return str(error)
 

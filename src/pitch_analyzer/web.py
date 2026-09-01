@@ -165,7 +165,6 @@ def index(request: Request, _: None = Depends(require_auth)) -> HTMLResponse:
 async def submit_analysis(
     request: Request,
     deck: UploadFile = File(...),
-    orientation: str = Form("landscape"),
     model: str = Form(DEFAULT_MODEL),
     # An unchecked HTML checkbox is omitted from the POST entirely, so the
     # default here must be "off" — otherwise unticking the box would do nothing.
@@ -178,10 +177,6 @@ async def submit_analysis(
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported file type '{suffix or filename}'. Expected .pdf or .pptx.",
-        )
-    if orientation not in ("landscape", "portrait"):
-        raise HTTPException(
-            status_code=400, detail="Orientation must be 'landscape' or 'portrait'."
         )
 
     payload = await deck.read()
@@ -197,7 +192,6 @@ async def submit_analysis(
     job = store.submit(
         filename=filename,
         payload=payload,
-        orientation=orientation,
         model=model.strip() or DEFAULT_MODEL,
         include_images=include_images == "on",
     )
@@ -227,7 +221,7 @@ def job_status(job_id: str, _: None = Depends(require_auth)) -> JSONResponse:
     return JSONResponse(job.as_dict())
 
 
-@app.get("/jobs/{job_id}/report.pdf")
+@app.get("/jobs/{job_id}/report.docx")
 def job_report(job_id: str, _: None = Depends(require_auth)) -> FileResponse:
     job = store.get(job_id)
     if job is None:
@@ -236,7 +230,9 @@ def job_report(job_id: str, _: None = Depends(require_auth)) -> FileResponse:
         raise HTTPException(status_code=409, detail="The report is not ready yet.")
     return FileResponse(
         job.report_path,
-        media_type="application/pdf",
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ),
         filename=job.report_filename,
     )
 
