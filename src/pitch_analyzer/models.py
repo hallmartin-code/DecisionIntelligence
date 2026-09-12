@@ -189,10 +189,10 @@ WEIGHT_PROFILES: dict[str, dict[str, int]] = {
 
 #: How each profile is described in the report, so a reader can see why the
 #: weights are what they are without consulting this file.
-PROFILE_LABELS: dict[str, str] = {
+PROFILE_NAMES: dict[str, str] = {
     "balanced": "Balanced",
-    "foundation": "Foundation-weighted (pre-revenue, pre-approval)",
-    "traction": "Traction-weighted (post-revenue, post-approval)",
+    "foundation": "Foundation-weighted",
+    "traction": "Traction-weighted",
 }
 
 PROFILE_RATIONALES: dict[str, str] = {
@@ -203,16 +203,16 @@ PROFILE_RATIONALES: dict[str, str] = {
         "on the basis of an assumption."
     ),
     "foundation": (
-        "This company is pre-revenue and pre-approval, so there is little "
-        "traction to weigh and weighting it heavily would score the same "
-        "absence twice. Team Assessment and Competitive Intelligence — which "
-        "carries the intellectual property and defensibility analysis — are "
-        "weighted most heavily instead, because at this stage they are what "
-        "can actually be judged."
+        "Nothing is being sold yet and no regulatory gate has been cleared, so "
+        "there is little traction to weigh and weighting it heavily would "
+        "score the same absence twice. Team Assessment and Competitive "
+        "Intelligence — which carries the intellectual property and "
+        "defensibility analysis — are weighted most heavily instead, "
+        "because at this stage they are what can actually be judged."
     ),
     "traction": (
-        "This company is past both revenue and regulatory approval, so the "
-        "market has already answered questions a deck can only assert. "
+        "This company is selling, with no regulatory gate left in front of it, "
+        "so the market has already answered questions a deck can only assert. "
         "Traction & Evidence Quality is weighted most heavily, and the "
         "narrative categories give way to it: demonstrated performance "
         "outranks argument once there is performance to demonstrate."
@@ -477,7 +477,12 @@ class CompanyStage(_Model):
 
     @property
     def label(self) -> str:
-        return PROFILE_LABELS[self.profile]
+        """The profile, qualified by the stage actually found in the source."""
+        name = PROFILE_NAMES[self.profile]
+        if self.profile == "balanced":
+            return name
+        summary = self.summary
+        return f"{name} ({summary[0].lower()}{summary[1:]})"
 
     @property
     def rationale(self) -> str:

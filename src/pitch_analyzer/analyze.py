@@ -47,6 +47,26 @@ def _correction_message(problem: str) -> str:
     )
 
 
+#: What went wrong when the turn ended on a tool call. The model does the whole
+#: analysis, writes the report into a file in the sandbox, and ends its turn --
+#: so the reply carries only its narration. Nothing reads that file, and the
+#: work is lost unless the reply is continued rather than restarted.
+NO_JSON_IN_REPLY = (
+    "your reply contained no JSON - you ended your turn on a tool call. "
+    "Anything written to a file in the sandbox is discarded; only the text of "
+    "your reply is read"
+)
+
+
+def _reply_is_only_narration(raw: str, message: Any) -> bool:
+    """True when the turn ended on tool use rather than on the answer."""
+    blocks = list(getattr(message, "content", []))
+    if not blocks:
+        return False
+    ended_on_a_tool = getattr(blocks[-1], "type", "") != "text"
+    return ended_on_a_tool and "{" not in raw
+
+
 class MissingAPIKeyError(RuntimeError):
     """Raised when no Anthropic API key is configured."""
 
@@ -225,16 +245,29 @@ def _run_analysis(
     raw = ""
     last_error = ""
     last_problem = "the response was not valid JSON"
+    previous: Any = None
     for attempt in range(2):
         if attempt:
             emit("Retrying with a targeted correction.")
-            messages.append({"role": "assistant", "content": raw or "(empty)"})
+            # Hand back the whole assistant turn, tool calls and results
+            # included, rather than just its text. The sandbox work is the
+            # expensive part - tens of thousands of output tokens - and
+            # replaying only the narration makes the model redo all of it.
+            content = getattr(previous, "content", None) or raw or "(empty)"
+            messages.append({"role": "assistant", "content": content})
             messages.append(
                 {"role": "user", "content": _correction_message(last_problem)}
             )
 
-        raw = _request_with_backoff(client, model, messages, emit, tools)
+        previous = _request_with_backoff(client, model, messages, emit, tools)
+        raw = _response_text(previous)
         emit(f"Received {len(raw)} characters from {model}.")
+
+        if _reply_is_only_narration(raw, previous):
+            last_error = "the turn ended on a tool call"
+            last_problem = NO_JSON_IN_REPLY
+            emit("The reply carried no JSON; the report was written nowhere.")
+            continue
 
         try:
             payload = _extract_json(raw)
@@ -298,8 +331,12 @@ def _request_with_backoff(
     messages: list[dict[str, Any]],
     emit: Callable[[str], None],
     tools: Optional[list[dict[str, Any]]] = None,
-) -> str:
-    """Call the Messages API, retrying rate limits with exponential backoff."""
+) -> Any:
+    """Call the Messages API, retrying rate limits with exponential backoff.
+
+    Returns the final message rather than its text: the caller needs the
+    content blocks to hand a failed turn back for continuation.
+    """
     import anthropic
 
     # Omitted rather than passed empty: an empty list is a different request,
@@ -326,7 +363,7 @@ def _request_with_backoff(
                     message = stream.get_final_message()
 
                 if getattr(message, "stop_reason", None) != "pause_turn":
-                    return _response_text(message)
+                    return message
 
                 # Without this the paused turn reads as a finished one, and
                 # what comes back is the model's opening narration rather than
@@ -340,7 +377,7 @@ def _request_with_backoff(
                 f"The turn was still paused after {MAX_TURN_CONTINUATIONS} "
                 "resumptions; using what it produced."
             )
-            return _response_text(message)
+            return message
         except anthropic.RateLimitError:
             if attempt == RATE_LIMIT_ATTEMPTS - 1:
                 raise RateLimitExceededError(

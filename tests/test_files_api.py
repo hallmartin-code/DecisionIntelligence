@@ -405,8 +405,103 @@ def test_resumption_is_bounded() -> None:
     ]
     logged: list[str] = []
 
-    text = _request_with_backoff(client, "model", [], logged.append, None)
+    from pitch_analyzer.analyze import _response_text
+
+    message = _request_with_backoff(client, "model", [], logged.append, None)
 
     assert client.messages.stream.call_count == MAX_TURN_CONTINUATIONS + 1
-    assert text == "still working"
+    assert _response_text(message) == "still working"
     assert any("still paused" in line for line in logged)
+
+
+# --------------------------------------------------------------------------- #
+# The turn that ends on a tool call
+# --------------------------------------------------------------------------- #
+
+
+def _wrote_to_a_file() -> MagicMock:
+    """The real shape of the failure, from a live run.
+
+    The model analyses the deck, writes the report into a file in the sandbox,
+    and ends its turn - so the reply carries only its narration and ~26,000
+    output tokens of analysis are stranded in a container nothing reads.
+    """
+    stream = _stream("")
+    message = stream.__enter__.return_value.get_final_message.return_value
+    message.stop_reason = "end_turn"
+    message.content = [
+        _block("text", "I will now analyze the deck systematically."),
+        _block("server_tool_use"),
+        _block("bash_code_execution_tool_result"),
+        _block("text", "Now I'll create the final JSON assessment:"),
+        _block("server_tool_use"),
+        _block("text_editor_code_execution_tool_result"),
+    ]
+    return stream
+
+
+def test_a_turn_that_ends_on_a_tool_call_is_not_mistaken_for_an_answer(
+    deck, analysis_payload
+) -> None:
+    from pitch_analyzer.analyze import NO_JSON_IN_REPLY
+
+    client = MagicMock()
+    client.messages.stream.side_effect = [
+        _wrote_to_a_file(),
+        _finished(json.dumps(analysis_payload)),
+    ]
+    logged: list[str] = []
+
+    result = analyze_deck(deck, client=client, log=logged.append)
+
+    assert result.recommendation == "Investigate Further"
+    # The follow-up must name the actual problem, not "invalid JSON": the model
+    # did not write malformed JSON, it wrote none at all.
+    follow_up = client.messages.stream.call_args_list[1].kwargs["messages"][-1]
+    assert follow_up["role"] == "user"
+    assert NO_JSON_IN_REPLY in follow_up["content"]
+
+
+def test_the_retry_keeps_the_sandbox_work(deck, analysis_payload) -> None:
+    """Replaying only the narration makes the model redo every calculation.
+
+    The tool blocks are the expensive part of the turn, so they go back as-is.
+    """
+    first = _wrote_to_a_file()
+    client = MagicMock()
+    client.messages.stream.side_effect = [
+        first,
+        _finished(json.dumps(analysis_payload)),
+    ]
+
+    analyze_deck(deck, client=client)
+
+    replayed = client.messages.stream.call_args_list[1].kwargs["messages"][-2]
+    assert replayed["role"] == "assistant"
+    kinds = [getattr(block, "type", None) for block in replayed["content"]]
+    assert "server_tool_use" in kinds and "text" in kinds, kinds
+
+
+def test_a_normal_reply_is_unaffected(deck, analysis_payload) -> None:
+    """A turn ending on the JSON must not be treated as narration."""
+    from pitch_analyzer.analyze import _reply_is_only_narration
+
+    message = MagicMock()
+    message.content = [_block("server_tool_use"), _block("text", '{"a": 1}')]
+    assert not _reply_is_only_narration('{"a": 1}', message)
+
+    # Nor should a tool-free response with no JSON: that is malformed output,
+    # a different problem with a different correction.
+    message.content = [_block("text", "sorry, I cannot")]
+    assert not _reply_is_only_narration("sorry, I cannot", message)
+
+
+def test_the_prompt_forbids_writing_the_report_to_a_file() -> None:
+    import re
+
+    from pitch_analyzer.prompt import SYSTEM_PROMPT
+
+    # The prompt is hard-wrapped, so a phrase can straddle a line break.
+    flat = re.sub(r"\s+", " ", SYSTEM_PROMPT).lower()
+    assert "do not write the assessment to a file" in flat
+    assert "nothing in the sandbox is read back" in flat

@@ -13,7 +13,7 @@ import pytest
 
 from pitch_analyzer.models import (
     CATEGORY_KEYS,
-    PROFILE_LABELS,
+    PROFILE_NAMES,
     WEIGHT_PROFILES,
     AnalysisResult,
     CompanyStage,
@@ -200,11 +200,11 @@ def test_a_payload_without_a_stage_scores_exactly_as_before(analysis_payload) ->
 
 def test_each_profile_is_explained_in_the_report(analysis_payload) -> None:
     for profile in WEIGHT_PROFILES:
-        assert profile in PROFILE_LABELS
+        assert profile in PROFILE_NAMES
     analysis = AnalysisResult.model_validate(
         _with_stage(analysis_payload, "Pre-revenue", "Pre-approval", "Slide 9.")
     )
-    assert analysis.stage.label == PROFILE_LABELS["foundation"]
+    assert analysis.stage.label == "Foundation-weighted (pre-revenue, pre-approval)"
     assert "Team Assessment" in analysis.stage.rationale
     assert "intellectual property" in analysis.stage.rationale
 
@@ -240,7 +240,7 @@ def test_the_weighting_is_stated_in_the_document(analysis_payload, tmp_path) -> 
     render_report(analysis, destination)
 
     text = "\n".join(p.text for p in docx.Document(destination).paragraphs)
-    assert PROFILE_LABELS["traction"] in text
+    assert "Traction-weighted (post-revenue, post-approval)" in text
     assert "Post-revenue, post-approval" in text
     assert "510(k) clearance" in text
     assert "Traction & Evidence Quality is weighted most heavily" in text
@@ -304,6 +304,39 @@ def test_the_email_names_the_weighting(analysis_payload, tmp_path) -> None:
         slide_count=10,
     )
 
-    label = PROFILE_LABELS["traction"]
+    label = analysis.stage.label
     assert label in message["text"]
     assert label in message["html"]
+
+
+@pytest.mark.parametrize(
+    "revenue,regulatory,forbidden",
+    [
+        # A business that never needed approval has not "cleared" one. Claiming
+        # it would be exactly the unsupported assertion this report exists to
+        # catch, made by the report itself.
+        ("Post-revenue", "Not applicable", "post-approval"),
+        ("Pre-revenue", "Not applicable", "pre-approval"),
+    ],
+)
+def test_the_weighting_note_claims_no_approval_that_was_never_sought(
+    revenue, regulatory, forbidden
+) -> None:
+    stage = CompanyStage(revenue=revenue, regulatory=regulatory)
+
+    assert forbidden not in stage.label.lower()
+    assert "no regulatory gate" in stage.label
+    assert "approval" not in stage.rationale.lower().replace(
+        "regulatory gate", ""
+    ) or "no regulatory gate" in stage.rationale
+
+
+def test_the_label_names_the_stage_the_source_established() -> None:
+    """The label is derived from the two gates, so it cannot drift from them."""
+    for revenue in ("Pre-revenue", "Post-revenue"):
+        for regulatory in ("Pre-approval", "Post-approval", "Not applicable"):
+            stage = CompanyStage(revenue=revenue, regulatory=regulatory)
+            if stage.profile == "balanced":
+                assert stage.label == "Balanced"
+            else:
+                assert stage.summary.lower() in stage.label.lower()

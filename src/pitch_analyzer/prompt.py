@@ -117,6 +117,13 @@ Working through the sandbox first is expected, and any commentary you write on
 the way there is discarded. Your LAST message must be the JSON object and
 nothing else — no preamble, no code fence, no summary of what you checked. All
 of that belongs inside the JSON fields.
+
+Type the JSON as your reply. Do NOT write the assessment to a file, and do not
+build it up in a variable, a heredoc, or a script in the sandbox: nothing in
+the sandbox is read back, so a report written there is a report thrown away.
+The sandbox is for arithmetic — compute the numbers there, then write the JSON
+out as your reply text. Ending your turn on a tool call rather than on the JSON
+means the whole analysis is discarded and has to be done again.
 """
 
 # A compact, complete example of the required output. Values are illustrative.
