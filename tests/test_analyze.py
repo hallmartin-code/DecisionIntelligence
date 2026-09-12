@@ -234,3 +234,25 @@ def test_extract_json_handles_wrapping(raw):
 def test_extract_json_rejects_non_json():
     with pytest.raises(json.JSONDecodeError):
         _extract_json("there is no object here")
+
+
+def test_a_validation_message_quotes_the_rejected_value():
+    """Naming only the field leaves the model to guess which part was wrong."""
+    import pydantic
+
+    from pitch_analyzer.analyze import _describe_validation
+    from pitch_analyzer.models import RiskRow
+
+    try:
+        RiskRow(
+            category="FINANCIAL",
+            risk="r",
+            probability="Astronomical",
+            impact="High",
+            mitigation="m",
+        )
+    except pydantic.ValidationError as error:
+        described = _describe_validation(error)
+
+    assert "probability" in described
+    assert "Astronomical" in described

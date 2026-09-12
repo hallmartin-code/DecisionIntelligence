@@ -303,10 +303,16 @@ def _describe_validation(error: Exception) -> str:
     except Exception:  # pragma: no cover - defensive
         return str(error).splitlines()[0]
 
-    parts = [
-        ".".join(str(piece) for piece in item.get("loc", ())) + f" ({item.get('msg', '')})"
-        for item in details[:5]
-    ]
+    parts = []
+    for item in details[:5]:
+        location = ".".join(str(piece) for piece in item.get("loc", ()))
+        # The rejected value, quoted. A message naming only the field leaves
+        # the model to guess which part of it was wrong, and leaves the next
+        # reader of the log unable to widen the schema.
+        received = repr(item.get("input"))
+        if len(received) > 60:
+            received = received[:57] + "..."
+        parts.append(f"{location} received {received} ({item.get('msg', '')})")
     suffix = f" and {len(details) - 5} more" if len(details) > 5 else ""
     return f"{len(details)} error(s): " + "; ".join(parts) + suffix
 

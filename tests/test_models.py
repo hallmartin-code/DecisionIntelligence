@@ -103,3 +103,52 @@ def test_memo_pads_to_nine_fields(analysis_payload):
     assert len(analysis.memo_rows) == 9
     assert analysis.memo_rows[0] == ("Company", "only one")
     assert analysis.memo_rows[-1][1] == ""
+
+
+@pytest.mark.parametrize(
+    "written,expected",
+    [
+        ("Very High", "High"),
+        ("very high", "High"),
+        ("VERY HIGH", "High"),
+        ("Critical", "High"),
+        ("Severe", "High"),
+        ("Extreme", "High"),
+        ("Moderate", "Medium"),
+        ("Negligible", "Low"),
+        ("Very Low", "Low"),
+        # The scale's own spellings must keep working.
+        ("Med-High", "Medium-High"),
+        ("Low-Medium", "Low-Medium"),
+        ("High", "High"),
+    ],
+)
+def test_risk_intensity_synonyms_are_folded(written, expected):
+    """A rejected risk level costs a second full generation of the report.
+
+    These are restatements of the same judgement, so folding them invents
+    nothing.
+    """
+    row = RiskRow(
+        category="FINANCIAL",
+        risk="r",
+        probability=written,
+        impact=written,
+        mitigation="m",
+    )
+    assert row.probability == expected
+    assert row.impact == expected
+
+
+def test_a_level_carrying_different_information_is_not_guessed_at():
+    """"Unknown" is not an intensity, and must not be folded into one."""
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        RiskRow(
+            category="FINANCIAL",
+            risk="r",
+            probability="Unknown",
+            impact="High",
+            mitigation="m",
+        )

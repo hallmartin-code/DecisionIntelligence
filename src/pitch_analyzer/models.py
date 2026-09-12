@@ -236,6 +236,21 @@ NOT_DISCLOSED = "Not disclosed"
 
 _ABBREVIATIONS = {"med": "medium", "mid": "medium", "hi": "high", "lo": "low"}
 
+#: Whole-phrase synonyms for the risk scale, keyed by slug. A model reaching
+#: for "Very High" means the top of this scale, and rejecting it costs a second
+#: full generation. Only intensity restatements belong here: anything that
+#: carries different information must still fail rather than be guessed at.
+_RISK_LEVEL_SYNONYMS = {
+    "very-low": "Low",
+    "negligible": "Low",
+    "minimal": "Low",
+    "very-high": "High",
+    "extreme": "High",
+    "critical": "High",
+    "severe": "High",
+    "moderate": "Medium",
+}
+
 
 def _canonical(text: str) -> str:
     """Fold the spellings a model reasonably reaches for onto one form.
@@ -394,6 +409,10 @@ class RiskRow(_Model):
     @field_validator("probability", "impact", mode="before")
     @classmethod
     def _fix_level(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            synonym = _RISK_LEVEL_SYNONYMS.get(_slug(value))
+            if synonym:
+                return synonym
         return _normalize(value, _RISK_LEVELS)
 
 
