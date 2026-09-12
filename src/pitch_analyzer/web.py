@@ -18,6 +18,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import __version__
@@ -37,6 +38,8 @@ logger = logging.getLogger(__name__)
 
 SUPPORTED_SUFFIXES = (".pdf", ".pptx")
 TEMPLATES_DIR = Path(__file__).resolve().parent / "web_templates"
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+FAVICON = STATIC_DIR / "favicon.ico"
 
 DEFAULT_MAX_UPLOAD_MB = 50
 MAX_UPLOAD_MB = env_int("MAX_UPLOAD_MB", DEFAULT_MAX_UPLOAD_MB)
@@ -79,6 +82,12 @@ app = FastAPI(
     version=__version__,
     lifespan=lifespan,
 )
+
+
+# Static assets are deliberately public, unlike every other route: the browser
+# fetches the icon while rendering the Basic-auth prompt, before anyone has
+# credentials to send. Nothing here is sensitive — it is the brand mark.
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 # --------------------------------------------------------------------------- #
@@ -191,6 +200,12 @@ def healthz() -> JSONResponse:
             "config_warnings": config_warnings(),
         }
     )
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    """Browsers ask for this path directly, whatever the HTML declares."""
+    return FileResponse(FAVICON, media_type="image/x-icon")
 
 
 @app.get("/", response_class=HTMLResponse)

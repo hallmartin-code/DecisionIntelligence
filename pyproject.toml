@@ -40,7 +40,7 @@ pitch-analyzer = "pitch_analyzer.cli:app"
 where = ["src"]
 
 [tool.setuptools.package-data]
-pitch_analyzer = ["web_templates/*.html"]
+pitch_analyzer = ["web_templates/*.html", "static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
