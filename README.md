@@ -300,7 +300,8 @@ Seven parts, in order:
 
 **The arithmetic closes.** Category weights are fixed in code, and the weighted
 total is computed from the section scores rather than taken from the model — so
-the scorecard can never disagree with the sections above it.
+the scorecard can never disagree with the sections above it. See
+[Stage-weighted scoring](#stage-weighted-scoring) for which weights apply.
 
 **Absent is not the same as bad.** The document separates information missing
 because the source format cannot carry it (noted, not scored against the
@@ -369,6 +370,55 @@ job log each time:
 
 `.pptx` decks and long decks therefore behave exactly as they did before this
 change.
+
+### Stage-weighted scoring
+
+What a category is worth depends on how far the company has actually got, so
+the scorecard applies one of three weightings. Every profile totals 100%, which
+keeps the score on a 0–10 scale and keeps two companies comparable however each
+was weighted.
+
+| Category | Balanced | Foundation | Traction |
+|---|---|---|---|
+| Problem Validation | 10% | 10% | 7% |
+| Solution Effectiveness | 12% | 13% | 9% |
+| Market Opportunity | 10% | 9% | 9% |
+| Competitive Intelligence | 8% | **13%** | 8% |
+| Business Model Intelligence | 10% | 7% | 12% |
+| Traction & Evidence Quality | 12% | 6% | **24%** |
+| Team Assessment | 15% | **22%** | 11% |
+| Financial Intelligence | 10% | 6% | 12% |
+| Risk Intelligence | 8% | 8% | 5% |
+| Assumption Mapping | 5% | 6% | 3% |
+
+**Foundation** applies to a company that is pre-revenue *and* pre-approval.
+There is no traction to weigh, and weighting an absence heavily just scores it
+twice — the report already records what is missing. What can be judged is who
+is doing this and whether anyone else could, so Team Assessment and Competitive
+Intelligence, which carries the IP and defensibility analysis, take the weight.
+
+**Traction** applies to a company past both gates. Customers and a clearance
+answer questions a deck can only assert — whether the problem is real, whether
+the thing works, whether anyone will pay. Traction & Evidence Quality doubles
+and the narrative categories give way to it.
+
+**Balanced** is the original weighting, and applies to everything else: a
+company that is post-revenue but pre-approval, or approved but not yet selling,
+sits between the two profiles and is not weighted on a guess. A stage the
+source does not establish reads as unknown and lands here too.
+
+**How the stage is determined.** The model classifies it from the deck and must
+cite what establishes it. The bar is deliberately strict: revenue means money
+earned from customers, not grants, prizes, letters of intent or forecasts;
+approval means a granted approval or clearance for the product being sold, not
+a submission or a designation. "Not applicable" — the ordinary case for
+software — counts with whichever side revenue is on, so an unregulated business
+is still weighted by how far it has got.
+
+The classification is the model's, but the weights are not: it reports the
+stage and the code selects the profile. A misread stage changes the emphasis of
+a report, never the arithmetic underneath it, and the report states on the
+scorecard which weighting was applied, on what evidence, and why.
 
 ### Errors
 

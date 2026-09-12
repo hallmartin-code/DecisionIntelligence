@@ -6,7 +6,7 @@ import pytest
 
 from pitch_analyzer.models import (
     CATEGORY_KEYS,
-    CATEGORY_WEIGHTS,
+    WEIGHT_PROFILES,
     AnalysisResult,
     AssumptionRow,
     RiskRow,
@@ -55,9 +55,14 @@ def test_assumption_confidence_is_uppercased(supplied, expected):
     assert row.confidence == expected
 
 
-def test_category_weights_total_one_hundred():
-    assert sum(CATEGORY_WEIGHTS.values()) == 100
+def test_every_profile_covers_every_category_and_totals_one_hundred():
+    """The weighted score stays on a 0-10 scale whichever profile applies, so
+    two companies at different stages remain comparable."""
     assert len(CATEGORY_KEYS) == 10
+    for name, weights in WEIGHT_PROFILES.items():
+        assert sum(weights.values()) == 100, name
+        assert set(weights) == set(CATEGORY_KEYS), name
+        assert all(weight > 0 for weight in weights.values()), name
 
 
 def test_weighted_total_is_computed_from_sections_not_the_model(analysis_payload):

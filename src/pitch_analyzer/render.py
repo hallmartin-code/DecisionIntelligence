@@ -378,7 +378,7 @@ def _part_executive_summary(document, analysis: AnalysisResult) -> None:
 def _part_assessment(document, analysis: AnalysisResult) -> None:
     _h1(document, "Decision Intelligence Assessment")
 
-    for number, (key, title, _weight) in enumerate(CATEGORIES, start=1):
+    for number, (key, title) in enumerate(CATEGORIES, start=1):
         section = analysis.assessment.section(key)
         _h2(document, f"{number}.  {title} — Score {section.score} / 10")
         _subsections(document, section.subsections)
@@ -478,6 +478,15 @@ def _part_committee_view(document, analysis: AnalysisResult) -> None:
 
 def _part_scorecard(document, analysis: AnalysisResult) -> None:
     _h1(document, "Decision Intelligence Scorecard")
+
+    # The weights differ by stage, so the table's numbers are unreadable
+    # without saying which weighting produced them and on what evidence.
+    stage = analysis.stage
+    _para(document, f"Weighting: {stage.label}", bold=True)
+    _para(document, f"Company stage: {stage.summary}.")
+    if stage.basis:
+        _para(document, f"Basis: {stage.basis}")
+    _para(document, stage.rationale, italic=True)
 
     rows = [
         (

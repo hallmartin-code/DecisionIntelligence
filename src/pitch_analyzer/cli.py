@@ -223,7 +223,8 @@ def _print_summary(analysis: AnalysisResult, destination: Path) -> None:
     console.print(
         f"\n[bold {color}]{analysis.recommendation.upper()}[/bold {color}] "
         f"- {analysis.confidence_pct}% confidence "
-        f"- weighted {analysis.weighted_overall:.1f}/10"
+        f"- weighted {analysis.weighted_overall:.1f}/10 "
+        f"({analysis.weight_profile} weighting)"
     )
     console.print(f"[green]OK[/green] Report written to [bold]{destination}[/bold]")
 

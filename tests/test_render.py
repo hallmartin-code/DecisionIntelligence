@@ -109,7 +109,7 @@ def test_all_seven_parts_are_present_in_order(report):
 def test_all_ten_categories_appear_numbered_and_scored(report):
     h2 = _headings(report, 12.0)
 
-    for number, (_key, title, _weight) in enumerate(CATEGORIES, start=1):
+    for number, (_key, title) in enumerate(CATEGORIES, start=1):
         assert any(
             heading.startswith(f"{number}.  {title} — Score ") for heading in h2
         ), f"missing assessment section: {title}"

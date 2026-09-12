@@ -78,6 +78,35 @@ SCORING
 
 Each of the ten categories is scored 0-10. Their weights are fixed by the
 system and applied automatically; do not compute the weighted total yourself.
+
+The weighting depends on how far the company has actually got, which you
+establish in `stage`. Judge the two gates independently and strictly from the
+source:
+
+- `revenue` is "Post-revenue" only if the source shows revenue actually being
+  earned from customers — booked revenue, ARR, paid contracts, units sold.
+  Grant income, prize money, a signed LOI, a pilot with no fee, or a forecast
+  are NOT revenue: those are "Pre-revenue".
+- `regulatory` is "Post-approval" only if the source shows a granted approval
+  or clearance for the product being sold — an FDA approval, a 510(k)
+  clearance, a De Novo, a CE mark. A submitted application, a granted
+  designation (orphan, breakthrough, fast track), or a cleared predicate
+  belonging to someone else is "Pre-approval". Use "Not applicable" when the
+  product needs no such approval to be sold, which is the ordinary case for
+  software and most non-medical hardware.
+- Use "Unknown" when the source does not establish the answer. Guessing here
+  changes how the company is scored, so the same rule applies as everywhere
+  else: absent means absent.
+
+Set `basis` to one sentence citing what establishes both, or naming what is
+missing. What this controls: a pre-revenue, pre-approval company is weighted
+towards Team Assessment and Competitive Intelligence, since its intellectual
+property and the people are what can actually be judged; a post-revenue,
+post-approval company is weighted towards Traction & Evidence Quality, since
+the market has already answered what the deck can only assert. Anything in
+between, or unknown, keeps the standard weights. Score each category on its
+own merits regardless — the weighting is applied afterwards, and is not a
+reason to inflate or discount any individual score.
 Score the material honestly: a well-run company with a thin document should
 score well on team and poorly on financial quality, and the document should
 explain exactly that.
@@ -95,6 +124,11 @@ OUTPUT_SCHEMA = """\
 {
   "company_name": "",
   "one_line_descriptor": "one sentence: what the product is",
+  "stage": {
+    "revenue": "Pre-revenue | Post-revenue | Unknown",
+    "regulatory": "Pre-approval | Post-approval | Not applicable | Unknown",
+    "basis": "one sentence citing the slide or line that establishes both"
+  },
   "metadata": {
     "source_document": "e.g. Executive Summary (1 page)",
     "analysis_date": "e.g. 31 August 2026",

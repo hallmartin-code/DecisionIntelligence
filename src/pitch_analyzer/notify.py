@@ -169,7 +169,8 @@ def _render_text(
         "",
         f"Recommendation: {analysis.recommendation} "
         f"({analysis.confidence_pct}% confidence)",
-        f"Weighted overall: {analysis.weighted_overall:.1f}/10",
+        f"Weighted overall: {analysis.weighted_overall:.1f}/10 "
+        f"({analysis.stage.label})",
         f"Decision quality: {analysis.composite.decision_quality:.1f}/10",
         "",
         "THESIS",
@@ -295,7 +296,8 @@ def _render_html(
         f'<strong style="color:#111827">{analysis.weighted_overall:.1f}/10'
         '</strong> &middot; Decision quality '
         f'<strong style="color:#111827">{analysis.composite.decision_quality:.1f}/10'
-        "</strong></p>"
+        "</strong><br>"
+        f"{escape(analysis.stage.label)}</p>"
         '<p style="margin:0 0 22px;font-size:14px;line-height:1.6;color:#1f2937">'
         f"{escape(summary.key_investment_thesis[0] if summary.key_investment_thesis else '')}</p>"
         + _section_heading("Strengths", "#16a34a")

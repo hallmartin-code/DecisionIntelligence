@@ -137,18 +137,34 @@ the whole document rests on:
 Ten numbered H2 sections, always in this order, each headed
 `{{ n }}.  {{ category }} — Score {{ score }} / 10`:
 
-| # | Category | Weight |
-|---|---|---|
-| 1 | Problem Validation | 10% |
-| 2 | Solution Effectiveness | 12% |
-| 3 | Market Opportunity | 10% |
-| 4 | Competitive Intelligence | 8% |
-| 5 | Business Model Intelligence | 10% |
-| 6 | Traction & Evidence Quality | 12% |
-| 7 | Team Assessment | 15% |
-| 8 | Financial Intelligence | 10% |
-| 9 | Risk Intelligence | 8% |
-| 10 | Assumption Mapping | 5% |
+The weight applied to each category depends on the company's stage. Every
+profile totals 100%, so the weighted score stays on the same 0–10 scale and two
+companies remain comparable however they are weighted.
+
+| # | Category | Balanced | Foundation | Traction |
+|---|---|---|---|---|
+| 1 | Problem Validation | 10% | 10% | 7% |
+| 2 | Solution Effectiveness | 12% | 13% | 9% |
+| 3 | Market Opportunity | 10% | 9% | 9% |
+| 4 | Competitive Intelligence | 8% | **13%** | 8% |
+| 5 | Business Model Intelligence | 10% | 7% | 12% |
+| 6 | Traction & Evidence Quality | 12% | 6% | **24%** |
+| 7 | Team Assessment | 15% | **22%** | 11% |
+| 8 | Financial Intelligence | 10% | 6% | 12% |
+| 9 | Risk Intelligence | 8% | 8% | 5% |
+| 10 | Assumption Mapping | 5% | 6% | 3% |
+
+- **Foundation** — pre-revenue *and* pre-approval. There is no traction to
+  weigh, so Team Assessment and Competitive Intelligence (which carries the
+  intellectual property and defensibility analysis) take the weight.
+- **Traction** — post-revenue *and* post-approval. Traction & Evidence Quality
+  roughly doubles; the narrative categories give way to demonstrated results.
+- **Balanced** — anything in between, or a stage the source does not establish.
+  A company that is post-revenue but pre-approval, or approved but not yet
+  selling, is not weighted on a guess.
+
+"Not applicable" regulatory status counts with whichever side revenue is on, so
+an unregulated business is still weighted by how far it has got.
 
 Each section carries 3–5 H3 sub-sections. The first is a question the section
 answers; the last is **`Recommended diligence questions`** (a plain numbered
@@ -230,7 +246,17 @@ disclosed) and **`EXPECTED RISK-ADJUSTED OUTCOME`**.
 
 ## 8. PART 5 — Decision Intelligence Scorecard
 
-A 12 × 5 grid — ten category rows plus a bold total row:
+Introduced by the weighting actually applied, so the numbers in the grid can
+be read:
+
+```
+Weighting: {{ profile_label }}
+Company stage: {{ revenue_stage }}, {{ regulatory_stage }}.
+Basis: {{ one sentence citing what establishes both }}
+{{ why this profile weights what it weights, in italic }}
+```
+
+Then a 12 × 5 grid — ten category rows plus a bold total row:
 
 | Category | Score | Weight | Weighted | Principal driver of the score |
 |---|---|---|---|---|
