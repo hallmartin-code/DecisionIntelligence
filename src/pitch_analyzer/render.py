@@ -17,7 +17,7 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Inches, Pt, RGBColor
+from docx.shared import Emu, Inches, Pt, RGBColor
 
 from .models import (
     CATEGORIES,
@@ -42,6 +42,17 @@ PANEL_FILL = "F5F7FA"
 HEADER_FILL = "1F3864"
 
 FONT = "Calibri"
+#: The house footer is set in Open Sans at 7pt, per the TEN Capital
+#: document standard. The body stays Calibri.
+FOOTER_FONT = "Open Sans"
+SIZE_FOOTER = Pt(7)
+
+#: The footer mark, at the size the standard specifies. The source is
+#: 631x232 (2.72:1) and these EMU are 2.69:1, so it is squeezed by about
+#: 1% - invisible, and the specified dimensions are what the standard says.
+LOGO_PATH = Path(__file__).resolve().parent / "assets" / "logo_footer.png"
+LOGO_WIDTH = Emu(604838)
+LOGO_HEIGHT = Emu(224940)
 
 SIZE_BRAND = Pt(10)
 SIZE_EYEBROW = Pt(8)
@@ -208,28 +219,63 @@ def _subsections(document, subsections: Iterable[SubSection]) -> None:
             _bullets(document, sub.bullets)
 
 
-def _footer(section, company_name: str) -> None:
+def _footer(section, company_name: str, stamp: date) -> None:
+    """The house footer: title, page number, attribution, mark - centred.
+
+    Follows the TEN Capital document standard rather than this report's own
+    earlier layout, so a reader who has seen one TEN document recognises this
+    one. "Confidential" is carried in the title, where the standard puts the
+    document's own name: this goes to an investment committee, and dropping a
+    confidentiality marker to match a template would be the wrong trade.
+    """
     paragraph = section.footer.paragraphs[0]
-    paragraph.paragraph_format.tab_stops.add_tab_stop(
-        Inches(CONTENT_WIDTH_IN), WD_TAB_ALIGNMENT.RIGHT
-    )
-    _run(
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    _footer_run(
         paragraph,
-        f"TEN Capital Group  ·  Decision Intelligence Assessment  ·  "
-        f"{company_name}  ·  Confidential\t",
-        size=Pt(8),
-        color=GREY,
+        f"Decision Intelligence Assessment  ·  {company_name}  ·  "
+        "Confidential        ",
     )
-    _run(paragraph, "Page ", size=Pt(8), color=GREY)
     _page_field(paragraph, "PAGE")
-    _run(paragraph, " of ", size=Pt(8), color=GREY)
+    _footer_run(paragraph, " of ")
     _page_field(paragraph, "NUMPAGES")
+    _footer_run(
+        paragraph,
+        f"        Compiled on {stamp:%d %B %Y} by TEN Capital Network  ",
+    )
+    _footer_logo(paragraph)
+
+
+def _footer_run(paragraph, text: str):
+    run = paragraph.add_run(text)
+    run.font.name = FOOTER_FONT
+    run.font.size = SIZE_FOOTER
+    run.font.color.rgb = GREY
+    return run
+
+
+def _footer_logo(paragraph) -> bool:
+    """Place the mark inline at the end of the footer.
+
+    A missing or unreadable logo must not fail a finished report - the analysis
+    is the deliverable and the mark is decoration - so this reports whether it
+    landed instead of raising.
+    """
+    if not LOGO_PATH.is_file():
+        return False
+    try:
+        paragraph.add_run().add_picture(
+            str(LOGO_PATH), width=LOGO_WIDTH, height=LOGO_HEIGHT
+        )
+    except Exception:  # pragma: no cover - a corrupt asset, not a code path
+        return False
+    return True
 
 
 def _page_field(paragraph, instruction: str) -> None:
     run = paragraph.add_run()
-    run.font.name = FONT
-    run.font.size = Pt(8)
+    run.font.name = FOOTER_FONT
+    run.font.size = SIZE_FOOTER
     run.font.color.rgb = GREY
 
     begin = OxmlElement("w:fldChar")
@@ -261,7 +307,7 @@ def render_report(
     stamp = generated_on or date.today()
 
     document = Document()
-    _configure(document, analysis.company_name)
+    _configure(document, analysis.company_name, stamp)
 
     _masthead(document, analysis, stamp)
     _part_executive_summary(document, analysis)
@@ -276,7 +322,7 @@ def render_report(
     return destination
 
 
-def _configure(document: Document, company_name: str) -> None:
+def _configure(document: Document, company_name: str, stamp: date) -> None:
     normal = document.styles["Normal"]
     normal.font.name = FONT
     normal.font.size = SIZE_BODY
@@ -287,7 +333,7 @@ def _configure(document: Document, company_name: str) -> None:
     section.page_height = PAGE_HEIGHT
     section.left_margin = section.right_margin = MARGIN_X
     section.top_margin = section.bottom_margin = MARGIN_Y
-    _footer(section, company_name)
+    _footer(section, company_name, stamp)
 
 
 # --------------------------------------------------------------------------- #

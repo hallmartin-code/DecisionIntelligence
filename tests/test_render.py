@@ -22,9 +22,15 @@ INCH = 914400
 
 
 @pytest.fixture
-def report(tmp_path, analysis_result):
-    path = render_report(analysis_result, tmp_path / "report.docx", generated_on=STAMP)
-    return Document(str(path))
+def report_path(tmp_path, analysis_result):
+    return render_report(
+        analysis_result, tmp_path / "report.docx", generated_on=STAMP
+    )
+
+
+@pytest.fixture
+def report(report_path):
+    return Document(str(report_path))
 
 
 def _text(document) -> str:
@@ -82,11 +88,64 @@ def test_page_setup_matches_the_specification(report):
 def test_footer_carries_the_company_and_a_page_field(report):
     footer = report.sections[0].footer.paragraphs[0]
 
-    assert "TEN Capital Group" in footer.text
+    assert "Decision Intelligence Assessment" in footer.text
     assert "Acme Robotics" in footer.text
+    # This goes to an investment committee; the marker stays even though the
+    # house footer pattern does not call for one.
     assert "Confidential" in footer.text
+    assert "by TEN Capital Network" in footer.text
     instructions = footer._p.findall(".//" + qn("w:instrText"))
     assert [i.text.strip() for i in instructions] == ["PAGE", "NUMPAGES"]
+
+
+def test_the_footer_follows_the_house_standard(report):
+    """Open Sans 7pt, centred - so a TEN document is recognisable as one."""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt
+
+    footer = report.sections[0].footer.paragraphs[0]
+
+    assert footer.alignment == WD_ALIGN_PARAGRAPH.CENTER
+    fonts = {run.font.name for run in footer.runs if run.font.name}
+    sizes = {run.font.size for run in footer.runs if run.font.size}
+    assert fonts == {"Open Sans"}, fonts
+    assert sizes == {Pt(7)}, sizes
+
+
+def test_the_footer_carries_the_logo(report_path):
+    """The mark has to be embedded in the file, not merely referenced."""
+    import re
+    import zipfile
+
+    from pitch_analyzer.render import LOGO_HEIGHT, LOGO_PATH, LOGO_WIDTH
+
+    with zipfile.ZipFile(report_path) as archive:
+        media = [n for n in archive.namelist() if n.startswith("word/media/")]
+        assert media, "no image was embedded in the document"
+        assert any(
+            archive.read(name) == LOGO_PATH.read_bytes() for name in media
+        ), "the embedded image is not the TEN Capital mark"
+
+        footer_xml = archive.read("word/footer1.xml").decode("utf-8")
+
+    assert "a:blip" in footer_xml, "the mark is not placed in the footer"
+    extent = re.findall(r'wp:extent cx="(\d+)" cy="(\d+)"', footer_xml)
+    assert (str(LOGO_WIDTH), str(LOGO_HEIGHT)) in extent, extent
+
+
+def test_a_missing_logo_does_not_fail_the_report(tmp_path, analysis_result, monkeypatch):
+    """The analysis is the deliverable; the mark is decoration."""
+    import docx
+
+    from pitch_analyzer import render
+
+    monkeypatch.setattr(render, "LOGO_PATH", tmp_path / "absent.png")
+    destination = tmp_path / "no_logo.docx"
+
+    render.render_report(analysis_result, destination)
+
+    footer = docx.Document(destination).sections[0].footer.paragraphs[0]
+    assert "Decision Intelligence Assessment" in footer.text
 
 
 # --------------------------------------------------------------------------- #
