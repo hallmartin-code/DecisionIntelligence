@@ -84,13 +84,31 @@ def test_the_page_references_the_shipped_icons(client) -> None:
     assert "data:image/svg+xml" not in html
 
 
-def test_every_referenced_icon_actually_resolves(client) -> None:
-    """A link tag pointing at a path that 404s is worse than no link tag."""
+def test_every_referenced_asset_actually_resolves(client) -> None:
+    """A tag pointing at a path that 404s is worse than no tag at all.
+
+    Covers src= as well as href=, so the header logo is checked and not only
+    the icons in <head>.
+    """
     import re
 
     html = client.get("/", auth=("ten", "secret")).text
-    referenced = set(re.findall(r'href="(/static/[^"]+)"', html))
+    referenced = set(re.findall(r'(?:href|src)="(/static/[^"]+)"', html))
 
-    assert referenced, "the page declares no icons"
+    assert referenced, "the page declares no static assets"
     for path in sorted(referenced):
         assert client.get(path).status_code == 200, path
+
+
+def test_the_header_shows_the_real_mark(client) -> None:
+    """The header carried a hand-drawn SVG approximation of the logo: three
+    arcs and three circles that rendered as scattered blobs rather than the
+    ring of three figures the mark actually is."""
+    html = client.get("/", auth=("ten", "secret")).text
+
+    assert '<img class="brand-mark" src="/static/icon.png"' in html
+    assert "<svg class=\"brand-mark\"" not in html
+    # The wordmark beside it supplies the accessible name, so the image is
+    # decorative and must not be announced twice.
+    assert 'alt="" aria-hidden="true"' in html
+    assert "TEN Capital" in html

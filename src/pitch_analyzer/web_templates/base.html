@@ -50,7 +50,7 @@
 
   /* -- brand ------------------------------------------------------------ */
   .brand{ display:flex; align-items:center; gap:12px; margin-bottom:28px; padding-left:4px; }
-  .brand-mark{ width:34px; height:34px; flex-shrink:0; }
+  .brand-mark{ display:block; width:34px; height:34px; flex-shrink:0; }
   .brand-word{
     font-family:var(--display); font-weight:800; font-size:15px;
     letter-spacing:.04em; line-height:1.15; text-transform:uppercase;
@@ -272,15 +272,9 @@
 
   <div class="brand">
     <a href="/">
-      <svg class="brand-mark" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M50 6 C64 6 74 16 74 16" stroke="var(--amber)" stroke-width="11" stroke-linecap="round" fill="none"/>
-        <path d="M76 66 C76 82 63 92 63 92" stroke="var(--teal)" stroke-width="11" stroke-linecap="round" fill="none"/>
-        <path d="M24 66 C24 82 37 92 37 92" stroke="var(--coral)" stroke-width="11" stroke-linecap="round" fill="none" transform="rotate(180 50 79)"/>
-        <circle cx="50" cy="20" r="11" fill="var(--amber)"/>
-        <circle cx="78" cy="68" r="11" fill="var(--teal)"/>
-        <circle cx="22" cy="68" r="11" fill="var(--coral)"/>
-      </svg>
-      <div class="brand-word">Ten Capital<span>Network</span></div>
+      <img class="brand-mark" src="/static/icon.png" alt="" aria-hidden="true"
+           width="34" height="34" decoding="async">
+      <div class="brand-word">TEN Capital<span>Network</span></div>
     </a>
   </div>
 

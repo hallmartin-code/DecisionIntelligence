@@ -122,7 +122,7 @@ def test_index_renders_for_an_authenticated_user(client):
     assert response.status_code == 200
     assert "Generate the report" in response.text
     assert "Deck Analyzer" in response.text
-    assert "Ten Capital" in response.text
+    assert "TEN Capital" in response.text
 
 
 def test_index_advertises_only_supported_deck_types(client):
@@ -403,7 +403,7 @@ def test_browser_errors_render_as_styled_html(client):
     assert response.status_code == 404
     assert "text/html" in response.headers["content-type"]
     assert "Nothing here" in response.text
-    assert "Ten Capital" in response.text
+    assert "TEN Capital" in response.text
 
 
 def test_api_errors_stay_json(client):
